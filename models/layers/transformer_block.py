@@ -13,7 +13,11 @@ from models.layers.mlp import MLP
 from models.layers.rotary_embedding import RotaryEmbedding
 
 def get_rmsnorm():
-    return nn.RMSNorm
+    try:
+        from liger_kernel.transformers.rms_norm import LigerRMSNorm as RMSNorm
+        return RMSNorm
+    except ImportError:
+        return nn.RMSNorm
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
@@ -52,7 +56,7 @@ class Transformer(nn.Module):
         return self.norm(x)
     
 def _update_causal_mask(attn_mask: torch.Tensor, input_tensor: torch.Tensor, cache_position: torch.Tensor, past_kv: Cache,) -> Optional[Tensor]:
-    past_seen_tokens = past_kv.get_seq_length() if past_kv is not None else 0
+    past_seen_tokens = past_kv.get_seq_length() if exists(past_kv) else 0
     using_static_cache = isinstance(past_kv, StaticCache)
 
     if not exists(attn_mask): return attn_mask

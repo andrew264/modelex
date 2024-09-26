@@ -6,16 +6,14 @@ from typing import Any, Dict, Optional, List, Tuple, Union
 import torch
 from torch import Tensor
 from tokenizers import Tokenizer
-from transformers import GenerationConfig, LogitsProcessorList, TopPLogitsWarper, StoppingCriteriaList, \
-    InfNanRemoveLogitsProcessor
+from transformers import GenerationConfig, LogitsProcessorList, TopPLogitsWarper, StoppingCriteriaList
 from transformers import LogitsWarper, StoppingCriteria, Cache
 
 from models.config import ModelCfg, InferenceCfg
-from models.llm import LLM
+from models.llm_inference import LLM
 from utils import get_state_dict_from_safetensors
 
 class TemperatureRangeLogitsWarper(LogitsWarper):
-
     def __init__(self, start: float, end: float, num_steps: int):
         super(TemperatureRangeLogitsWarper, self).__init__()
         if end < 0 or start < 0: raise ValueError("Temperature must be greater than 0.")
@@ -36,8 +34,7 @@ class TemperatureRangeLogitsWarper(LogitsWarper):
 class StoppingCriteriaSub(StoppingCriteria):
     def __init__(self, stops: Optional[List[Tensor]] = None, encounters=1):
         super().__init__()
-        if stops is None:
-            stops = []
+        if stops is None: stops = []
         self.stops = stops
         self.ENCOUNTERS = encounters
 
@@ -157,7 +154,7 @@ class ModelGenerationHandler:
         return StoppingCriteriaList([StoppingCriteriaSub(stops=stopping_tokens, encounters=1)])
 
     def set_processor(self, top_p: float = 0.95, temperature: float = 1.7):
-        self.processor = LogitsProcessorList([TemperatureRangeLogitsWarper(temperature, 0.9, 24), TopPLogitsWarper(top_p=top_p), InfNanRemoveLogitsProcessor()])
+        self.processor = LogitsProcessorList([TemperatureRangeLogitsWarper(temperature, 0.9, 24), TopPLogitsWarper(top_p=top_p), ])
 
     def _compile_model(self):
         print('Compiling...')

@@ -1,3 +1,5 @@
 torch
 transformers
 safetensors
+litserve
+liger-kernel

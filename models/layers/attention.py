@@ -9,17 +9,20 @@ from transformers import Cache
 from models.config import ModelCfg
 
 def rotate_half(x: Tensor) -> Tensor:
-    B, nh, T, hs = x.size()
-    x = x.view(B, nh, T, 2, hs // 2)
-    x1, x2 = x.unbind(dim=-2)
-    return torch.cat((-x2, x1), dim=-1)
+    return torch.cat((-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]), dim=-1)
 
-def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsqueeze_dim: int = 2) -> Tensor:
+def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, pos_ids: Optional[Tensor] = None, unsqueeze_dim: int = 1) -> Tensor:
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
     q_embed = (q * cos) + (rotate_half(q) * sin)
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
+
+try:
+    from liger_kernel.transformers.rope import liger_rotary_pos_emb
+    apply_rotary_pos_emb = liger_rotary_pos_emb
+except ImportError:
+    pass
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
@@ -60,9 +63,8 @@ class Attention(nn.Module):
         q = q.view(bsz, seqlen, self.num_heads, self.head_dim)
         k = k.view(bsz, seqlen, self.num_kv_heads, self.head_dim)
         v = v.view(bsz, seqlen, self.num_kv_heads, self.head_dim)
-
-        q, k = apply_rotary_pos_emb(q, k, *freqs)
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
+        q, k = apply_rotary_pos_emb(q, k, *freqs)
 
         if exists(cache_position) and exists(past_kv): k, v = past_kv.update(k, v, self.layer_idx, dict(cache_position=cache_position))
 
