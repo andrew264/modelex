@@ -1,7 +1,7 @@
 import torch
 import argparse
 
-from models.llm_generation_handler import ModelGenerationHandler
+from models.generation_handler import ModelGenerationHandler
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="generate sequence")

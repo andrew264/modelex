@@ -3,7 +3,7 @@ import os
 import torch
 import argparse
 
-from models.llm_generation_handler import ModelGenerationHandler
+from models.generation_handler import ModelGenerationHandler
 from utils.prompt_format import Prompt
 
 def multiline_input(name: str = 'User'):

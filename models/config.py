@@ -51,3 +51,10 @@ class InferenceCfg(Cfg):
     eos_tokens: list[int] = [128001, 128008, 128009]
     pad_token: int = 128004
     percision: str = 'bf16'
+
+class PeftCfg(Cfg):
+    type: str = 'lora'
+    rank: int = 8
+    alpha: int = 16
+    dropout: float = 0.05
+    layers: list[str] = ['qkv_proj', 'o_proj', 'mlp', 'lm_head']

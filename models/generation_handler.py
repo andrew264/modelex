@@ -10,7 +10,7 @@ from transformers import GenerationConfig, LogitsProcessorList, TopPLogitsWarper
 from transformers import LogitsWarper, StoppingCriteria, Cache
 
 from models.config import ModelCfg, InferenceCfg
-from models.llm_inference import LLM
+from models.inference_model import LLM
 from utils import get_state_dict_from_safetensors
 
 class TemperatureRangeLogitsWarper(LogitsWarper):
@@ -38,7 +38,7 @@ class StoppingCriteriaSub(StoppingCriteria):
         self.stops = stops
         self.ENCOUNTERS = encounters
 
-    def __call__(self, input_ids: Tensor, scores: Tensor, **kwargs):
+    def __call__(self, input_ids: Tensor, scores: Tensor, **kwargs) -> bool:
         stop_count = 0
         batch_size = input_ids.size(0)
         for batch in input_ids:
@@ -53,7 +53,7 @@ class StaticCache(Cache):
         self.cfg = cfg
         self.is_compiled = compiled_mode
         self.dtype = dtype
-        
+
         if device: self.device = device
         elif torch.cuda.is_available(): self.device = torch.device('cuda')
         else: self.device = torch.device('cpu')
@@ -102,7 +102,7 @@ class StaticCache(Cache):
 
 
 class ModelGenerationHandler:
-    def __init__(self, path: str, device: Union[str | torch.device]):
+    def __init__(self, path: str, device: Union[str, torch.device]):
         self.path = path
         self.device = torch.device(device) if isinstance(device, str) else device
         self.cfg: Optional[ModelCfg] = None
@@ -119,6 +119,7 @@ class ModelGenerationHandler:
         self.infer_cfg = InferenceCfg.from_yaml(os.path.join(self.path, 'inference.yaml'))
         self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
 
+        model_sd = {}
         if os.path.exists(os.path.join(self.path, 'model.safetensors')):
             model_sd = get_state_dict_from_safetensors(os.path.join(self.path, 'model.safetensors'), torch.device('cpu'))
         else: raise FileNotFoundError("Model file not found.")

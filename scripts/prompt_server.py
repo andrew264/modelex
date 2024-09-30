@@ -6,7 +6,7 @@ from typing import Tuple
 import litserve as ls
 import torch
 
-from models.llm_generation_handler import ModelGenerationHandler
+from models.generation_handler import ModelGenerationHandler
 from utils.prompt_format import Message, Prompt
 
 class ModelAPI(ls.LitAPI):

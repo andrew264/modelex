@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, Optional
 
 import torch
@@ -6,7 +7,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from transformers import Cache
 
-from models.config import ModelCfg
+from models.config import ModelCfg, PeftCfg
 
 def rotate_half(x: Tensor) -> Tensor:
     return torch.cat((-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]), dim=-1)
@@ -27,7 +28,7 @@ except ImportError:
 def exists(x: Optional[Any]) -> bool: return x is not None
 
 class Attention(nn.Module):
-    def __init__(self, cfg: ModelCfg, layer_idx: int):
+    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None):
         super(Attention, self).__init__()
         self.cfg = cfg
         self.layer_idx = layer_idx
@@ -37,9 +38,23 @@ class Attention(nn.Module):
         self.head_dim = cfg.hidden_size // cfg.num_heads
         self.kv_hidden_size = cfg.num_kv_heads * self.head_dim
         self.num_kv_groups = cfg.num_heads // cfg.num_kv_heads
+        qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
 
-        self.qkv_proj = nn.Linear(cfg.hidden_size, cfg.hidden_size + 2 * self.kv_hidden_size, bias=cfg.attn_qkv_bias)
-        self.o_proj = nn.Linear(cfg.hidden_size, cfg.hidden_size, bias=cfg.attn_out_bias)
+        if peft_cfg:
+            if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
+            else: from torchtune.modules.peft import LoRALinear as Linear
+            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
+            if 'qkv_proj' in peft_cfg.layers:
+                self.qkv_proj = Linear(in_dim=cfg.hidden_size, out_dim=qkv_out_dim, use_bias=cfg.attn_qkv_bias)
+            else:
+                self.qkv_proj = nn.Linear(in_features=cfg.hidden_size, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias)
+            if 'o_proj' in peft_cfg.layers:
+                self.o_proj = Linear(in_dim=cfg.hidden_size, out_dim=cfg.hidden_size, use_bias=cfg.attn_out_bias)
+            else:
+                self.o_proj = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.hidden_size, bias=cfg.attn_out_bias)
+        else:
+            self.qkv_proj = nn.Linear(in_features=cfg.hidden_size, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias)
+            self.o_proj = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.hidden_size, bias=cfg.attn_out_bias)
         self._register_load_state_dict_pre_hook(self.fused_qkv_hook)
 
     @staticmethod
