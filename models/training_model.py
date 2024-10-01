@@ -4,6 +4,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 from torch import Tensor
+from transformers import get_cosine_schedule_with_warmup
 
 from models.config import ModelCfg, PeftCfg
 from models.layers.transformer_block import Transformer
@@ -17,16 +18,22 @@ except ImportError:
 
 class LLMLit(L.LightningModule):
     def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None, *args: Any, **kwargs: Any) -> None:
+        use_grad_checkpointing: bool = kwargs.pop('use_grad_checkpointing', False)
+        lr: float = kwargs.pop('lr', 1e-4)
+        use_scheduler: bool = kwargs.pop('use_scheduler', True)
+        warmup: int = kwargs.pop('warmup', 100)
         super().__init__(*args, **kwargs)
         self.cfg = cfg
         self.peft_cfg = peft_cfg
         self.save_hyperparameters()
+        self.lr = lr
+        self.use_scheduler = use_scheduler
+        self.warmup = warmup
 
-        checkpointing = kwargs.get('enable_checkpointing', False)
         self.tie_word_embeddings = cfg.tie_word_embeddings
 
-        self.model = Transformer(cfg=cfg, peft_cfg=peft_cfg, enable_checkpointing=checkpointing)
-        if peft_cfg:
+        self.model = Transformer(cfg=cfg, peft_cfg=peft_cfg, use_grad_checkpointing=use_grad_checkpointing)
+        if peft_cfg and 'lm_head' in peft_cfg.layers:
             if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
             else: from torchtune.modules.peft import LoRALinear as Linear
             Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
@@ -38,6 +45,8 @@ class LLMLit(L.LightningModule):
         if FUSED_CE and LigerFusedLinearCrossEntropyLoss:
             self.loss = LigerFusedLinearCrossEntropyLoss(ignore_index=-100)
         else: self.loss = nn.CrossEntropyLoss(ignore_index=-100)
+
+        self.tie_weights()
 
     def _init_weights(self, module):
         std = self.cfg.initializer_range
@@ -51,7 +60,7 @@ class LLMLit(L.LightningModule):
     def tie_weights(self):
         if self.tie_word_embeddings: self.lm_head.weight = self.model.embed_tokens.weight
 
-    def forward(self,x: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None) -> Tensor:
         x = self.model(x=x, attn_mask=attn_mask)
         labels = labels[..., 1:].contiguous().view(-1)
         if FUSED_CE:
@@ -84,3 +93,17 @@ class LLMLit(L.LightningModule):
         self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
         self.log("train_ppl", torch.exp(loss), on_step=True, prog_bar=True, sync_dist=True)
         return loss
+    
+    def configure_optimizers(self):
+        try:
+            from bitsandbytes.optim import AdamW8bit
+        except ImportError as e:
+            raise ImportError("Please install bitsandbytes to use this model for training.") from e 
+
+        optimizer = AdamW8bit(params=self.parameters(), lr=self.lr, weight_decay=0.1, betas=(0.9, 0.95),)
+        if self.use_scheduler:
+            scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=self.warmup, num_training_steps=self.trainer.estimated_stepping_batches)
+
+            lr_scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1,}
+            return { "optimizer": optimizer, "lr_scheduler": lr_scheduler_config,}
+        return optimizer

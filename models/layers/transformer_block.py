@@ -36,9 +36,9 @@ class Block(nn.Module):
         return h + self.mlp(self.post_attention_layernorm(h))
     
 class Transformer(nn.Module):
-    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[None] = None, enable_checkpointing: bool = False) -> None:
+    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[None] = None, use_grad_checkpointing: bool = False) -> None:
         super(Transformer, self).__init__()
-        self.checkpointing = enable_checkpointing
+        self.use_grad_checkpointing = use_grad_checkpointing
         self.embed_tokens = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
         self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg) for idx in range(cfg.num_layers)])
         self.norm = get_rmsnorm()(cfg.hidden_size, eps=cfg.rms_norm_eps)
@@ -51,7 +51,7 @@ class Transformer(nn.Module):
         freqs = self.rotary_emb(pos_ids)
 
         for layer in self.layers:
-            if self.training and self.checkpointing: x = checkpoint(layer, x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position, use_reentrant=False)
+            if self.training and self.use_grad_checkpointing: x = checkpoint(layer, x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position, use_reentrant=False)
             else: x = layer(x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position)
         return self.norm(x)
     

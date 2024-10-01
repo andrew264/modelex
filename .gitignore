@@ -1,4 +1,6 @@
 /weights
 /data
+/lightning_logs
+/.idea
 
 *.pyc

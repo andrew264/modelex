@@ -1,4 +1,5 @@
 import gc
+import glob
 import os
 import time
 from typing import Any, Dict, Optional, List, Tuple, Union
@@ -8,8 +9,9 @@ from torch import Tensor
 from tokenizers import Tokenizer
 from transformers import GenerationConfig, LogitsProcessorList, TopPLogitsWarper, StoppingCriteriaList
 from transformers import LogitsWarper, StoppingCriteria, Cache
+from torchtune.modules.peft import get_merged_lora_ckpt
 
-from models.config import ModelCfg, InferenceCfg
+from models.config import ModelCfg, InferenceCfg, PeftCfg
 from models.inference_model import LLM
 from utils import get_state_dict_from_safetensors
 
@@ -106,6 +108,7 @@ class ModelGenerationHandler:
         self.path = path
         self.device = torch.device(device) if isinstance(device, str) else device
         self.cfg: Optional[ModelCfg] = None
+        self.p_cfg: Optional[PeftCfg] = None
         self.infer_cfg: Optional[InferenceCfg] = None
         self.tokenizer: Optional[Tokenizer] = None
         self.model: Optional[LLM] = None
@@ -118,15 +121,25 @@ class ModelGenerationHandler:
         self.cfg = ModelCfg.from_yaml(os.path.join(self.path, 'model.yaml'))
         self.infer_cfg = InferenceCfg.from_yaml(os.path.join(self.path, 'inference.yaml'))
         self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
+        p_cfg = None
+        if os.path.exists(os.path.join(self.path, 'peft.yaml')):
+            p_cfg = PeftCfg.from_yaml(os.path.join(self.path, 'peft.yaml'))
+        self.p_cfg = p_cfg
 
         model_sd = {}
-        if os.path.exists(os.path.join(self.path, 'model.safetensors')):
-            model_sd = get_state_dict_from_safetensors(os.path.join(self.path, 'model.safetensors'), torch.device('cpu'))
+        adaptor_sd = {}
+        model_files = [os.path.abspath(path) for path in glob.glob(os.path.join(self.path, 'model*.safetensors'))]
+        if model_files:
+            model_sd = get_state_dict_from_safetensors(model_files, torch.device('cpu'))
         else: raise FileNotFoundError("Model file not found.")
+        if self.p_cfg: adaptor_sd = get_state_dict_from_safetensors(os.path.join(self.path, 'adaptor.safetensors'), torch.device('cpu'))
 
         model = LLM(self.cfg).bfloat16()
+        model.load_state_dict(model_sd, strict=False, assign=True)  # converts the keys to suit the model
+
+        if adaptor_sd: model_sd = get_merged_lora_ckpt(model.state_dict() | adaptor_sd, rank=self.p_cfg.rank, alpha=self.p_cfg.alpha)
         model.load_state_dict(model_sd, strict=False, assign=True)
-        del model_sd
+        del model_sd, adaptor_sd
 
         model.bos_token_id = self.infer_cfg.bos_token
         model.eval()

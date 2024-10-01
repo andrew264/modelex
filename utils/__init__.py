@@ -9,7 +9,7 @@ from safetensors.torch import save_file as safe_save_file
 def get_state_dict_from_safetensors(path: str | list[str], device: torch.device = torch.device('cpu')) -> Optional[dict]:
     state_dict = {}
     if isinstance(path, str): path = [path]
-    if path and os.path.exists(path[0]):
+    if path:
         start = time.time()
         d = device.type if device.type == 'cpu' else device.index
         for p in path:

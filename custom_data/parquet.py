@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Union
 import pyarrow.parquet as pq
 from tokenizers import Tokenizer
 
-class ParquetDataset:
+class ParquetTextDataset:
     def __init__(self, path: str, tokenizer_path: Optional[str]=None) -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path) if tokenizer_path else None
         self.parquet_files = glob.glob(f"{path}/**/*.parquet", recursive=True)
