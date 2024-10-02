@@ -4,6 +4,7 @@ import os
 import torch
 import lightning as L
 from torchtune.modules.peft import get_adapter_params, set_trainable_params
+from lightning.pytorch.strategies import DeepSpeedStrategy
 
 from models.config import ModelCfg, PeftCfg
 from models.training_model import LLMLit
@@ -12,7 +13,13 @@ from custom_data import DataModule
 
 torch.set_float32_matmul_precision('high')
 
-def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: int, accum_steps: int, lr: float, use_scheduler: bool, warmup: int, use_grad_checkpointing: bool) -> None:
+class Range(object):
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+    def __eq__(self, other): return self.start <= other <= self.end
+
+def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: int, accum_steps: int, lr: float, use_scheduler: bool, warmup: int, use_grad_checkpointing: bool, val_interval: float, use_stage3: bool) -> None:
     print('='*75)
     print("Path: ", path)
     print("Training dataset: ", train_ds)
@@ -25,6 +32,8 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     print("Using LR Scheduler: ", use_scheduler)
     print("Scheduler Warmup Steps: ", warmup)
     print("Using Gradient Checkpointing: ", use_grad_checkpointing)
+    print("Validation Check Interval: ", val_interval)
+    print("Using Stage 3 Offload: ", use_stage3)
     print('='*75)
     cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
     p_cfg = None
@@ -37,14 +46,24 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     if p_cfg: set_trainable_params(model, get_adapter_params(model))
     model.tie_weights()
     datamod = DataModule(train_ds, valid_ds, batch_size=bs, max_seq_length=cfg.max_seq_len, pad_id=cfg.pad_token)
+    if use_stage3:
+        strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True)
+        from deepspeed.ops.adam import DeepSpeedCPUAdam
+        model.set_optimizer(DeepSpeedCPUAdam)
+    else:
+        strategy = 'auto'
+        from bitsandbytes.optim.adamw import AdamW8bit
+        model.set_optimizer(AdamW8bit)
 
     trainer = L.Trainer(accelerator="gpu",
-                        precision="bf16-mixed",
+                        strategy=strategy,
+                        precision="bf16-true",
                         max_epochs=epochs,
                         enable_checkpointing=False,
                         enable_progress_bar=True,
                         log_every_n_steps=accum_steps,
                         gradient_clip_val=1.0,
+                        val_check_interval=val_interval,
                         accumulate_grad_batches=accum_steps)
 
     trainer.fit(model, train_dataloaders=datamod)
@@ -64,8 +83,10 @@ if __name__ == "__main__":
     parser.add_argument("--num-epochs", type=int, default=1, help="Number of epochs (Defaults to 1)")
     parser.add_argument("--accum-steps", type=int, default=8, help="Gradient Accumulation Steps (Defaults to 1)")
     parser.add_argument("--learning-rate", "-lr", type=float, default=1e-4, help="Set Learning Rate")
-    parser.add_argument("--use-scheduler", action=argparse.BooleanOptionalAction, default=True, help="Enable LR Scheduler")
+    parser.add_argument("--use-scheduler", action=argparse.BooleanOptionalAction, default=False, help="Enable LR Scheduler")
     parser.add_argument("--warmup", type=int, default=100, help="Number of warmup steps")
-    parser.add_argument("--use-grad-checkpointing", action=argparse.BooleanOptionalAction, default=True, help="Enable Gradient Checkpointing")
+    parser.add_argument("--use-grad-checkpointing", action=argparse.BooleanOptionalAction, default=False, help="Enable Gradient Checkpointing")
+    parser.add_argument("--validation-interval", type=float, default=1.0, choices=[Range(0.0, 1.0)], help="Validation Interval")
+    parser.add_argument("--use-stage3", action=argparse.BooleanOptionalAction, default=False, help="Enable Stage 3 Offload")
     args = parser.parse_args()
-    main(args.path, args.train_data, args.validation_data, args.device, args.bs, args.num_epochs, args.accum_steps, args.learning_rate, args.use_scheduler, args.warmup, args.use_grad_checkpointing)
+    main(args.path, args.train_data, args.validation_data, args.device, args.bs, args.num_epochs, args.accum_steps, args.learning_rate, args.use_scheduler, args.warmup, args.use_grad_checkpointing, args.validation_interval, args.use_stage3)

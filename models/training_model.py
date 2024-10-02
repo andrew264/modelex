@@ -45,6 +45,7 @@ class LLMLit(L.LightningModule):
         if FUSED_CE and LigerFusedLinearCrossEntropyLoss:
             self.loss = LigerFusedLinearCrossEntropyLoss(ignore_index=-100)
         else: self.loss = nn.CrossEntropyLoss(ignore_index=-100)
+        self._opt_class = None
 
         self.tie_weights()
 
@@ -78,7 +79,6 @@ class LLMLit(L.LightningModule):
         attention_mask = batch.get("attention_mask")
 
         loss = self(input_ids, labels, attention_mask)
-
         self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
         self.log("train_ppl", torch.exp(loss), on_step=True, prog_bar=True, sync_dist=True)
         return loss
@@ -89,21 +89,17 @@ class LLMLit(L.LightningModule):
         attention_mask = batch.get("attention_mask")
 
         loss = self(input_ids, labels, attention_mask)
-
         self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
         self.log("train_ppl", torch.exp(loss), on_step=True, prog_bar=True, sync_dist=True)
         return loss
     
+    def set_optimizer(self, opt) -> None: self._opt_class = opt
+    
     def configure_optimizers(self):
-        try:
-            from bitsandbytes.optim import AdamW8bit
-        except ImportError as e:
-            raise ImportError("Please install bitsandbytes to use this model for training.") from e 
-
-        optimizer = AdamW8bit(params=self.parameters(), lr=self.lr, weight_decay=0.1, betas=(0.9, 0.95),)
+        if self._opt_class is None: raise ValueError('Pls set opt wit .set_optimizer()')
+        optimizer = self._opt_class(self.parameters(), lr=self.lr, weight_decay=0.1, betas=(0.9, 0.95),)
         if self.use_scheduler:
             scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=self.warmup, num_training_steps=self.trainer.estimated_stepping_batches)
-
             lr_scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1,}
             return { "optimizer": optimizer, "lr_scheduler": lr_scheduler_config,}
         return optimizer

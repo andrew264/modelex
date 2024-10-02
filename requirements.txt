@@ -3,3 +3,8 @@ transformers
 safetensors
 litserve
 liger-kernel
+lightning
+bitsandbytes
+deepspeed
+torchtune
+datasets
