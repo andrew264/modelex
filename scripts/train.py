@@ -44,10 +44,9 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     model = LLMLit(cfg=cfg, peft_cfg=p_cfg, lr=lr, use_scheduler=use_scheduler, warmup=warmup, use_grad_checkpointing=use_grad_checkpointing)
     model.load_state_dict(model_sd, strict=False, assign=True)
     if p_cfg: set_trainable_params(model, get_adapter_params(model))
-    model.tie_weights()
     datamod = DataModule(train_ds, valid_ds, batch_size=bs, max_seq_length=cfg.max_seq_len, pad_id=cfg.pad_token)
     if use_stage3:
-        strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True)
+        strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True, pin_memory=False)
         from deepspeed.ops.adam import DeepSpeedCPUAdam
         model.set_optimizer(DeepSpeedCPUAdam)
     else:

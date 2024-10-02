@@ -149,7 +149,6 @@ class ModelGenerationHandler:
         self.model = model
 
         self.cache = StaticCache(self.cfg, compiled_mode=compiled, batch_size=self.infer_cfg.num_beams, device=self.device)
-        model.tie_weights()
         self.stopping_criteria = self._get_stop_criteria()
         if compiled: self._compile_model()
 

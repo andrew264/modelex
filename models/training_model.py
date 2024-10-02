@@ -3,8 +3,9 @@ from typing import Any, Optional
 import lightning as L
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
-from transformers import get_cosine_schedule_with_warmup
+from torchtune.modules import get_cosine_schedule_with_warmup
 
 from models.config import ModelCfg, PeftCfg
 from models.layers.transformer_block import Transformer
@@ -15,6 +16,14 @@ try:
 except ImportError:
     LigerFusedLinearCrossEntropyLoss = None
     FUSED_CE = False
+
+class TiedLinear:
+    def __init__(self, tied_module: nn.Module):
+        self.tied_module = tied_module
+        if not hasattr(tied_module, "weight"): raise AttributeError("Provided module does not have attribute 'weight'. Please check your tied_module.")
+    def __call__(self, x: Tensor) -> Tensor: return F.linear(x, self.tied_module.weight)
+    @property
+    def weight(self) -> Tensor: return self.tied_module.weight
 
 class LLMLit(L.LightningModule):
     def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None, *args: Any, **kwargs: Any) -> None:
@@ -33,21 +42,22 @@ class LLMLit(L.LightningModule):
         self.tie_word_embeddings = cfg.tie_word_embeddings
 
         self.model = Transformer(cfg=cfg, peft_cfg=peft_cfg, use_grad_checkpointing=use_grad_checkpointing)
-        if peft_cfg and 'lm_head' in peft_cfg.layers:
-            if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
-            else: from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
-            self.lm_head = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
+        if not self.tie_word_embeddings:
+            if peft_cfg and 'lm_head' in peft_cfg.layers:
+                if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
+                else: from torchtune.modules.peft import LoRALinear as Linear
+                Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
+                self.lm_head = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
+            else:
+                self.lm_head = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
         else:
-            self.lm_head = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
+            self.lm_head = TiedLinear(self.model.embed_tokens)
         self.apply(self._init_weights)
 
         if FUSED_CE and LigerFusedLinearCrossEntropyLoss:
             self.loss = LigerFusedLinearCrossEntropyLoss(ignore_index=-100)
         else: self.loss = nn.CrossEntropyLoss(ignore_index=-100)
         self._opt_class = None
-
-        self.tie_weights()
 
     def _init_weights(self, module):
         std = self.cfg.initializer_range
@@ -57,9 +67,6 @@ class LLMLit(L.LightningModule):
         elif isinstance(module, nn.Embedding):
             module.weight.data.normal_(mean=0.0, std=std)
             if module.padding_idx is not None: module.weight.data[module.padding_idx].zero_()
-
-    def tie_weights(self):
-        if self.tie_word_embeddings: self.lm_head.weight = self.model.embed_tokens.weight
 
     def forward(self, x: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None) -> Tensor:
         x = self.model(x=x, attn_mask=attn_mask)

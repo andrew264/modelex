@@ -3,6 +3,7 @@ from typing import Optional, Any
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torchtune.modules import TiedLinear
 from transformers import GenerationMixin, Cache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.modeling_utils import ModuleUtilsMixin
@@ -23,10 +24,10 @@ class LLM(nn.Module, ModuleUtilsMixin, GenerationMixin):
         self.config = self.dummyconfig()
 
         self.model = Transformer(cfg=cfg)
-        self.lm_head = nn.Linear(cfg.hidden_size, cfg.vocab_size, bias=False)
-
-    def tie_weights(self):
-        if self.cfg.tie_word_embeddings: self.lm_head.weight = self.model.embed_tokens.weight
+        if not self.cfg.tie_word_embeddings:
+            self.lm_head = nn.Linear(cfg.hidden_size, cfg.vocab_size, bias=False)
+        else:
+            self.lm_head = TiedLinear(self.model.embed_tokens)
 
     def forward(self, x: Tensor, pos_ids: Optional[Tensor] = None, cache_position: Optional[Tensor] = None, attn_mask: Optional[Tensor] = None, past_kv: Optional[Cache] = None, **kwargs) -> CausalLMOutputWithPast:
         logits = self.lm_head(self.model(x=x, pos_ids=pos_ids, cache_position=cache_position, attn_mask=attn_mask, past_kv=past_kv))
