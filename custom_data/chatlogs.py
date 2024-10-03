@@ -6,15 +6,15 @@ from typing import Dict, List, TypedDict
 
 from tokenizers import Tokenizer
 
+from custom_data.prompt_format import ChatFormatType, ChatFormat, Llama3Format, Gemma2Format, CustomFormat
+
 class Message(TypedDict):
     user: str
     message: str
 
-class Conversations:
+class Conversations(ChatFormat):
     CROSS_ENTROPY_IGNORE_IDX = -100
-    BOT, EOT = '<|begin_of_text|>', '<|eot_id|>\n'
-    SH, EH = '<|start_header_id|>', '<|end_header_id|>\n\n'
-    def __init__(self, path: str, tokenizer_path: str) -> None:
+    def __init__(self, path: str, tokenizer_path: str, chat_format: str = "llama3") -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path)
         self._files = glob.glob(f'{path}/**/*.json', recursive=True)
         self._sysprompt = ''
@@ -22,6 +22,14 @@ class Conversations:
         with open(os.path.join(path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: self._sysprompt = f.read().format(datetime=dt).strip()
         self._assistant_name = 'assistant'
         with open(os.path.join(path, 'name'), 'r', encoding='utf-8') as f: self._assistant_name = f.read()
+        self.select_format(chat_format=chat_format)
+    def select_format(self, chat_format: str):
+        match chat_format:
+            case ChatFormatType.LLAMA3.value: self._apply_format(Llama3Format)
+            case ChatFormatType.GEMMA2.value: self._apply_format(Gemma2Format)
+            case ChatFormatType.CUSTOM.value: self._apply_format(CustomFormat)
+            case _: raise ValueError(f"Unknown chat_format: {chat_format}")
+    def _apply_format(self, fmt: ChatFormat): self.BOT, self.EOT, self.SH, self.EH = fmt.BOT, fmt.EOT, fmt.SH, fmt.EH
     def __len__(self,)->int: return len(self._files)
     def _get_encoded(self, data: List[Message]) -> Dict[str, List[int]]:
         ids, labels = [], []

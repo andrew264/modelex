@@ -50,7 +50,11 @@ class InferenceCfg(Cfg):
     bos_token: int = 128000
     eos_tokens: list[int] = [128001, 128008, 128009]
     pad_token: int = 128004
-    percision: str = 'bf16'
+    precision: str = 'bf16'
+    chat_format: str = 'llama3'
+    top_p: float = .95
+    top_k: int = 12
+    temperature: float = 1.
 
 class PeftCfg(Cfg):
     type: str = 'lora'

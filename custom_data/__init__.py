@@ -1,7 +1,6 @@
 from functools import partial
 from typing import List, Dict, Optional
 
-import msgpack
 import pyarrow.parquet as pq
 import torch
 from torch.utils.data import DataLoader, Dataset

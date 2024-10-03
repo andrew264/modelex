@@ -1,5 +1,6 @@
 from functools import partial
 from typing import Any, Optional
+
 import lightning as L
 import torch
 import torch.nn as nn
@@ -86,8 +87,8 @@ class LLMLit(L.LightningModule):
         attention_mask = batch.get("attention_mask")
 
         loss = self(input_ids, labels, attention_mask)
-        self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
-        self.log("train_ppl", torch.exp(loss), on_step=True, prog_bar=True, sync_dist=True)
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("train_ppl", torch.exp(loss), prog_bar=True, sync_dist=True)
         return loss
     
     def validation_step(self, batch: dict):
@@ -96,8 +97,8 @@ class LLMLit(L.LightningModule):
         attention_mask = batch.get("attention_mask")
 
         loss = self(input_ids, labels, attention_mask)
-        self.log("train_loss", loss, on_step=True, prog_bar=True, sync_dist=True)
-        self.log("train_ppl", torch.exp(loss), on_step=True, prog_bar=True, sync_dist=True)
+        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
+        self.log("train_ppl", torch.exp(loss), prog_bar=True, sync_dist=True)
         return loss
     
     def set_optimizer(self, opt) -> None: self._opt_class = opt

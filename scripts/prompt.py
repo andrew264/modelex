@@ -4,7 +4,7 @@ import torch
 import argparse
 
 from models.generation_handler import ModelGenerationHandler
-from utils.prompt_format import Prompt
+from custom_data.prompt_format import Prompt
 
 def multiline_input(name: str = 'User'):
     lines = []
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
     with open(os.path.join(args.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: sysprompt = f.read().format(datetime=dt).strip()
 
-    prompt = Prompt(args.botname, sysprompt)
+    prompt = Prompt(args.botname, sysprompt, chat_format=model_handler.prompt_format)
 
     while True:
         inp = multiline_input(args.name)

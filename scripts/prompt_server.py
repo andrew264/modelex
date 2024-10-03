@@ -1,20 +1,20 @@
 import argparse
 import datetime
 import os
-from typing import Tuple
+from typing import Tuple, Optional
 
 import litserve as ls
 import torch
 
 from models.generation_handler import ModelGenerationHandler
-from utils.prompt_format import Message, Prompt
+from custom_data.prompt_format import Message, Prompt
 
 class ModelAPI(ls.LitAPI):
     def __init__(self, path: str, assistant_name: str):
         super().__init__()
         self.device = None
         self.path = path
-        self.model_handler = None
+        self.model_handler: Optional[ModelGenerationHandler] = None
         self.sysprompt: str = ""
         self.assistant_name: str = assistant_name
 
@@ -25,18 +25,12 @@ class ModelAPI(ls.LitAPI):
         self.model_handler.load_model(compiled=False)
         with open(os.path.join(self.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: self.sysprompt = f.read().strip()
 
-    def decode_request(self, request, **kwargs):
-        msgs: list[Message] = request['msgs']
-        top_p = request.get('top_p', 0.99)
-        temp = request.get('temp', 1.7)
-        return msgs, top_p, temp
-    
+    def decode_request(self, request, **kwargs) -> list[Message]: return request['msgs']
     def predict(self, x, **kwargs) -> Tuple[str, int]:
-        msgs, top_p, temp = x
-        self.model_handler.set_processor(top_p, temp)
         dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
-        p = Prompt(assistant_name=self.assistant_name, sysprompt=self.sysprompt.format(datetime=dt))
-        p.add_msgs(msgs)
+        p = Prompt(assistant_name=self.assistant_name, sysprompt=self.sysprompt.format(datetime=dt),
+                   chat_format=self.model_handler.prompt_format)
+        p.add_msgs(x)
         decoded, _, total_toks, _ = self.model_handler.generate(p.get_prompt_for_completion(), max_new_tokens=1024)
         return decoded, total_toks
     

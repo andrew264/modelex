@@ -7,13 +7,15 @@ from typing import Any, Dict, Optional, List, Tuple, Union
 import torch
 from torch import Tensor
 from tokenizers import Tokenizer
-from transformers import GenerationConfig, LogitsProcessorList, TopPLogitsWarper, StoppingCriteriaList
+from transformers import GenerationConfig, LogitsProcessorList, TopKLogitsWarper, TopPLogitsWarper, StoppingCriteriaList
 from transformers import LogitsWarper, StoppingCriteria, Cache
 from torchtune.modules.peft import get_merged_lora_ckpt
 
 from models.config import ModelCfg, InferenceCfg, PeftCfg
 from models.inference_model import LLM
 from utils import get_state_dict_from_safetensors
+
+def exists(x: Optional[Any]) -> bool: return x is not None
 
 class TemperatureRangeLogitsWarper(LogitsWarper):
     def __init__(self, start: float, end: float, num_steps: int):
@@ -115,7 +117,9 @@ class ModelGenerationHandler:
         self.cache: Optional[Cache] = None
         self.stopping_criteria: Optional[StoppingCriteriaList] = None
         self.processor: Optional[LogitsProcessorList] = None
-        self.set_processor()
+
+    @property
+    def prompt_format(self,) -> str: return self.infer_cfg.chat_format if exists(self.infer_cfg) else ""
 
     def load_model(self, compiled: bool = False,):
         self.cfg = ModelCfg.from_yaml(os.path.join(self.path, 'model.yaml'))
@@ -126,11 +130,9 @@ class ModelGenerationHandler:
             p_cfg = PeftCfg.from_yaml(os.path.join(self.path, 'peft.yaml'))
         self.p_cfg = p_cfg
 
-        model_sd = {}
         adaptor_sd = {}
         model_files = [os.path.abspath(path) for path in glob.glob(os.path.join(self.path, 'model*.safetensors'))]
-        if model_files:
-            model_sd = get_state_dict_from_safetensors(model_files, torch.device('cpu'))
+        if model_files: model_sd = get_state_dict_from_safetensors(model_files, torch.device('cpu'))
         else: raise FileNotFoundError("Model file not found.")
         if self.p_cfg: adaptor_sd = get_state_dict_from_safetensors(os.path.join(self.path, 'adaptor.safetensors'), torch.device('cpu'))
 
@@ -150,6 +152,7 @@ class ModelGenerationHandler:
 
         self.cache = StaticCache(self.cfg, compiled_mode=compiled, batch_size=self.infer_cfg.num_beams, device=self.device)
         self.stopping_criteria = self._get_stop_criteria()
+        self.set_processor()
         if compiled: self._compile_model()
 
         if self.device.type == 'cuda':
@@ -166,8 +169,11 @@ class ModelGenerationHandler:
         stopping_tokens: List[torch.Tensor] = [torch.tensor([eot], device=self.device) for eot in self.infer_cfg.eos_tokens]
         return StoppingCriteriaList([StoppingCriteriaSub(stops=stopping_tokens, encounters=1)])
 
-    def set_processor(self, top_p: float = 0.95, temperature: float = 1.7):
-        self.processor = LogitsProcessorList([TemperatureRangeLogitsWarper(temperature, 0.9, 24), TopPLogitsWarper(top_p=top_p), ])
+    def set_processor(self):
+        cfg = self.infer_cfg
+        self.processor = LogitsProcessorList([TemperatureRangeLogitsWarper(cfg.temperature, 0.9, 24),
+                                              TopPLogitsWarper(top_p=cfg.top_p),
+                                              TopKLogitsWarper(top_k=cfg.top_k),])
 
     def _compile_model(self):
         print('Compiling...')
