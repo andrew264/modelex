@@ -56,7 +56,9 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     print("Unexpected Keys: ", unexpected)
     if p_cfg:
         set_trainable_params(model, get_adapter_params(model))
-        if p_cfg.type == 'dora': load_dora_magnitudes(model)
+        if p_cfg.type == 'dora':
+            for m in model.modules():
+                if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()  # i wish someone made documentation on this ffs
     datamod = DataModule(train_ds, valid_ds, batch_size=bs, max_seq_length=cfg.max_seq_len, pad_id=cfg.pad_token)
     if use_stage3:
         strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True, pin_memory=False)
