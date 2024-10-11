@@ -43,7 +43,7 @@ class Attention(nn.Module):
         if peft_cfg:
             if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
             else: from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
+            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
             if 'qkv_proj' in peft_cfg.layers:
                 self.qkv_proj = Linear(in_dim=cfg.hidden_size, out_dim=qkv_out_dim, use_bias=cfg.attn_qkv_bias)
             else:

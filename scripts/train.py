@@ -4,10 +4,10 @@ import os
 
 import torch
 import lightning as L
-from torchtune.modules.peft import get_adapter_params, set_trainable_params
+from torchtune.modules.common_utils import _register_reparametrize_state_dict_hooks
+from torchtune.modules.peft import get_adapter_params, set_trainable_params, load_dora_magnitudes
 from lightning.pytorch.strategies import DeepSpeedStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint
-
 
 from models.config import ModelCfg, PeftCfg
 from models.training_model import LLMLit
@@ -16,14 +16,18 @@ from custom_data import DataModule
 
 torch.set_float32_matmul_precision('high')
 
+
 class Range(object):
     def __init__(self, start, end):
         self.start = start
         self.end = end
+
     def __eq__(self, other): return self.start <= other <= self.end
 
-def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: int, accum_steps: int, lr: float, use_scheduler: bool, warmup: int, use_grad_checkpointing: bool, val_interval: float, use_stage3: bool) -> None:
-    print('='*75)
+
+def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: int, accum_steps: int, lr: float,
+         use_scheduler: bool, warmup: int, use_grad_checkpointing: bool, val_interval: float, use_stage3: bool) -> None:
+    print('=' * 75)
     print("Path: ", path)
     print("Training dataset: ", train_ds)
     print("Validation dataset: ", valid_ds)
@@ -37,18 +41,22 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     print("Using Gradient Checkpointing: ", use_grad_checkpointing)
     print("Validation Check Interval: ", val_interval)
     print("Using Stage 3 Offload: ", use_stage3)
-    print('='*75)
+    print('=' * 75)
     cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
     p_cfg = None
     if os.path.exists(os.path.join(path, 'peft.yaml')):
         p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
         print('Peft Config Found')
     model_files = [os.path.abspath(p) for p in glob.glob(os.path.join(path, 'model*.safetensors'))]
+    model_sd = {}
     if model_files: model_sd = get_state_dict_from_safetensors(model_files)
-    else: model_sd = {}
-    model = LLMLit(cfg=cfg, peft_cfg=p_cfg, lr=lr, use_scheduler=use_scheduler, warmup=warmup, use_grad_checkpointing=use_grad_checkpointing)
-    model.load_state_dict(model_sd, strict=False, assign=True)
-    if p_cfg: set_trainable_params(model, get_adapter_params(model))
+    model = LLMLit(cfg=cfg, peft_cfg=p_cfg, lr=lr, use_scheduler=use_scheduler, warmup=warmup,
+                   use_grad_checkpointing=use_grad_checkpointing).bfloat16()
+    if p_cfg and p_cfg.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.model.embed_tokens.weight.dtype)
+    model.load_state_dict(model_sd, strict=False,)
+    if p_cfg:
+        set_trainable_params(model, get_adapter_params(model))
+        if p_cfg.type == 'dora': load_dora_magnitudes(model)
     datamod = DataModule(train_ds, valid_ds, batch_size=bs, max_seq_length=cfg.max_seq_len, pad_id=cfg.pad_token)
     if use_stage3:
         strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True, pin_memory=False)
@@ -61,28 +69,28 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     ckpt_path = os.path.join(path, 'checkpoint')
     if not os.path.isdir(ckpt_path): os.mkdir(ckpt_path)
     ckpt_callback = ModelCheckpoint(ckpt_path, save_last=True)
-
     trainer = L.Trainer(accelerator="gpu",
                         strategy=strategy,
-                        precision="bf16-true",
+                        precision="bf16-mixed",
                         max_epochs=epochs,
                         enable_progress_bar=True,
                         log_every_n_steps=accum_steps,
                         gradient_clip_val=1.0,
                         val_check_interval=val_interval,
                         accumulate_grad_batches=accum_steps,
-                        callbacks=[ckpt_callback])
+                        callbacks=[ckpt_callback],)
 
     trainer.fit(model, train_dataloaders=datamod)
     if use_stage3:
         del model
-        model = LLMLit(cfg=cfg, peft_cfg=p_cfg,).cpu()
+        model = LLMLit(cfg=cfg, peft_cfg=p_cfg, ).cpu()
         model.load_state_dict(get_state_dict_from_deepspeed_ckpt(os.path.join(ckpt_path, 'last.ckpt')))
     if p_cfg:
         lora_params = get_adapter_params(model)
         safe_save_file(lora_params, os.path.join(path, 'adaptor.safetensors'))
     else:
         safe_save_file(model.state_dict(), os.path.join(path, 'model.safetensors'))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="generate sequence")
@@ -100,4 +108,6 @@ if __name__ == "__main__":
     parser.add_argument("--validation-interval", type=float, default=1.0, choices=[Range(0.0, 1.0)], help="Validation Interval")
     parser.add_argument("--use-stage3", action=argparse.BooleanOptionalAction, default=False, help="Enable Stage 3 Offload")
     args = parser.parse_args()
-    main(args.path, args.train_data, args.validation_data, args.device, args.bs, args.num_epochs, args.accum_steps, args.learning_rate, args.use_scheduler, args.warmup, args.use_grad_checkpointing, args.validation_interval, args.use_stage3)
+    main(args.path, args.train_data, args.validation_data, args.device, args.bs, args.num_epochs, args.accum_steps,
+         args.learning_rate, args.use_scheduler, args.warmup, args.use_grad_checkpointing, args.validation_interval,
+         args.use_stage3)

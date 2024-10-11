@@ -47,7 +47,7 @@ class LLMLit(L.LightningModule):
             if peft_cfg and 'lm_head' in peft_cfg.layers:
                 if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
                 else: from torchtune.modules.peft import LoRALinear as Linear
-                Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
+                Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
                 self.lm_head = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
             else:
                 self.lm_head = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)

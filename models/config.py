@@ -62,3 +62,4 @@ class PeftCfg(Cfg):
     alpha: int = 16
     dropout: float = 0.05
     layers: list[str] = ['qkv_proj', 'o_proj', 'mlp', 'lm_head']
+    quant_base: bool = False

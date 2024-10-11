@@ -18,7 +18,7 @@ class MLP(nn.Module):
         if peft_cfg:
             if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
             else: from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout)
+            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
             self.gate_proj = Linear(in_dim=cfg.hidden_size, out_dim=cfg.intermediate_size, use_bias=cfg.mlp_bias)
             self.up_proj = Linear(in_dim=cfg.hidden_size, out_dim=cfg.intermediate_size, use_bias=cfg.mlp_bias)
             self.down_proj = Linear(in_dim=cfg.intermediate_size, out_dim=cfg.hidden_size, use_bias=cfg.mlp_bias)

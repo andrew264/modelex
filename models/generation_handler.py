@@ -5,15 +5,16 @@ import time
 from typing import Any, Dict, Optional, List, Tuple, Union
 
 import torch
-from torch import Tensor
 from tokenizers import Tokenizer
+from torch import Tensor
+from torchtune.modules.peft import get_merged_lora_ckpt
 from transformers import GenerationConfig, LogitsProcessorList, TopKLogitsWarper, TopPLogitsWarper, StoppingCriteriaList
 from transformers import LogitsWarper, StoppingCriteria, Cache
-from torchtune.modules.peft import get_merged_lora_ckpt
 
 from models.config import ModelCfg, InferenceCfg, PeftCfg
 from models.inference_model import LLM
 from utils import get_state_dict_from_safetensors
+
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
@@ -153,13 +154,13 @@ class ModelGenerationHandler:
         self.cache = StaticCache(self.cfg, compiled_mode=compiled, batch_size=self.infer_cfg.num_beams, device=self.device)
         self.stopping_criteria = self._get_stop_criteria()
         self.set_processor()
+        self.model.generation_config = self.get_gen_config(None)
         if compiled: self._compile_model()
 
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
             torch.cuda.synchronize(device=self.device)
 
-        self.model.generation_config = self.get_gen_config(None)
 
     def get_gen_config(self, max_new_tokens: Optional[int] = 512):
         cfg = self.infer_cfg
