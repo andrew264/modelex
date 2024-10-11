@@ -53,7 +53,7 @@ class LLMLit(L.LightningModule):
                 self.lm_head = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
         else:
             self.lm_head = TiedLinear(self.model.embed_tokens)
-        self.apply(self._init_weights)
+        # self.apply(self._init_weights)
 
         if FUSED_CE and LigerFusedLinearCrossEntropyLoss:
             self.loss = LigerFusedLinearCrossEntropyLoss(ignore_index=-100)
@@ -73,11 +73,11 @@ class LLMLit(L.LightningModule):
         x = self.model(x=x, attn_mask=attn_mask)
         labels = labels[..., 1:].contiguous().view(-1)
         if FUSED_CE:
-            x = x[..., :-1, :].view(-1, self.cfg.hidden_size)
+            x = x[..., :-1, :].contiguous().view(-1, self.cfg.hidden_size)
             loss = self.loss(self.lm_head.weight, x, labels)
         else:
             x = self.lm_head(x)
-            x = x[..., :-1, :].view(-1, self.cfg.hidden_size)
+            x = x[..., :-1, :].contiguous().view(-1, self.cfg.vocab_size)
             loss = self.loss(x, labels)
         return loss
 

@@ -50,10 +50,10 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     model_files = [os.path.abspath(p) for p in glob.glob(os.path.join(path, 'model*.safetensors'))]
     model_sd = {}
     if model_files: model_sd = get_state_dict_from_safetensors(model_files)
-    model = LLMLit(cfg=cfg, peft_cfg=p_cfg, lr=lr, use_scheduler=use_scheduler, warmup=warmup,
-                   use_grad_checkpointing=use_grad_checkpointing).bfloat16()
+    model = LLMLit(cfg=cfg, peft_cfg=p_cfg, lr=lr, use_scheduler=use_scheduler, warmup=warmup, use_grad_checkpointing=use_grad_checkpointing)
     if p_cfg and p_cfg.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.model.embed_tokens.weight.dtype)
-    model.load_state_dict(model_sd, strict=False,)
+    _, unexpected = model.load_state_dict(model_sd, strict=False)
+    print("Unexpected Keys: ", unexpected)
     if p_cfg:
         set_trainable_params(model, get_adapter_params(model))
         if p_cfg.type == 'dora': load_dora_magnitudes(model)
@@ -79,7 +79,6 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
                         val_check_interval=val_interval,
                         accumulate_grad_batches=accum_steps,
                         callbacks=[ckpt_callback],)
-
     trainer.fit(model, train_dataloaders=datamod)
     if use_stage3:
         del model

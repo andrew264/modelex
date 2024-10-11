@@ -29,8 +29,8 @@ class DataModule(L.LightningDataModule):
         MAX_LEN = max_len
         max_len = max([len(x['input_ids']) for x in batch])
 
-        input_ids = torch.stack([torch.tensor(x['input_ids'] + [0] * (max_len - len(x['input_ids']))) for x in batch])
-        labels = torch.stack([torch.tensor(x['labels'] + [CROSS_ENTROPY_IGNORE_IDX] * (max_len - len(x['labels']))) for x in batch])
+        input_ids = torch.stack([torch.tensor([0] * (max_len - len(x['input_ids'])) + x['input_ids']) for x in batch])
+        labels = torch.stack([torch.tensor([CROSS_ENTROPY_IGNORE_IDX] * (max_len - len(x['labels'])) + x['labels']) for x in batch])
         attention_mask = (input_ids != torch.tensor(pad_id, dtype=input_ids.dtype)).long()
 
         if len(batch) == 1 and attention_mask.sum().item() == attention_mask.numel(): attention_mask = None
@@ -43,8 +43,8 @@ class DataModule(L.LightningDataModule):
     def collate_max_len_pad_fn(max_len: int, pad_id: int, batch: List[Dict[str, List[int]]]) -> dict:
         MAX_LEN = max_len
 
-        input_ids = torch.stack([torch.tensor(x['input_ids'] + [0] * (MAX_LEN - len(x['input_ids']))) for x in batch])
-        labels = torch.stack([torch.tensor(x['labels'] + [CROSS_ENTROPY_IGNORE_IDX] * (MAX_LEN - len(x['labels']))) for x in batch])
+        input_ids = torch.stack([torch.tensor([0] * (MAX_LEN - len(x['input_ids'])) + x['input_ids']) for x in batch])
+        labels = torch.stack([torch.tensor([CROSS_ENTROPY_IGNORE_IDX] * (MAX_LEN - len(x['labels'])) + x['labels']) for x in batch])
         attention_mask = (input_ids != torch.tensor(pad_id, dtype=input_ids.dtype)).long()
 
         return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}

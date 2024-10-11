@@ -33,7 +33,7 @@ class Conversations(ChatFormat):
     def __len__(self,)->int: return len(self._files)
     def _get_encoded(self, data: List[Message]) -> Dict[str, List[int]]:
         ids, labels = [], []
-        sp = self._tokenizer.encode(f'{self.BOT}{self.SH}system{self.EH}{self._sysprompt}{self.EOT}', add_special_tokens=False)
+        sp = self._tokenizer.encode(f'{self.BOT}{self.SH}system{self.EH}{self._sysprompt}{self.EOT}'.strip(), add_special_tokens=False)
         ids.extend(sp.ids)
         labels.extend([self.CROSS_ENTROPY_IGNORE_IDX] * len(sp.ids))
         for msg in data:

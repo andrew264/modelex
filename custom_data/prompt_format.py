@@ -18,8 +18,8 @@ class Gemma2Format(ChatFormat):
     SH, EH = '<start_of_turn>', '\n'
 
 class CustomFormat(ChatFormat):
-    BOT, EOT = '', '</s>\n'
-    SH, EH = '<|', '|>\n<s>'
+    BOT, EOT = '', '</s>'
+    SH, EH = '\n<|', '|>\n<s>'
 
 class ChatFormatType(Enum):
     LLAMA3 = 'llama3'
