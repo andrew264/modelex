@@ -47,6 +47,7 @@ class Transformer(nn.Module):
     def forward(self, x: Tensor, pos_ids: Optional[Tensor]=None, cache_position: Optional[Tensor]=None, attn_mask: Optional[Tensor]=None, past_kv: Optional[Cache]=None) -> Tensor:
         x = self.embed_tokens(x)
         if pos_ids is None: pos_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0)
+        if exists(attn_mask) and cache_position is None: cache_position = torch.arange(x.shape[1], device=x.device)
         causal_mask = _update_causal_mask(attn_mask, x, cache_position, past_kv)
         freqs = self.rotary_emb(pos_ids)
 

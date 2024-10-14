@@ -26,20 +26,11 @@ This class accepts the following arguments:
 
 ## Train Models
 
-To train a model, run:
-
+To train a model
+- First set up the config at `model_directory/train.yaml`
+- and run the following command
 ```bash
 python scripts/train.py model_directory/ train.parquet validate.parquet
-    --device 0                # GPU 0
-    --bs 1                    # Batch size
-    --num-epochs 1            # Number of epochs to train the model
-    --accum-steps 16          # Number of gradient accumulation steps
-    --learning-rate 0.0001    # Learning rate
-    --use-scheduler           # Enable cosine LR scheduler
-    --warmup 100              # Number of warmup steps for LR scheduler
-    --use-grad-checkpointing  # Enable gradient checkpointing
-    --validation-interval 1   # How often to check the validation set
-    --use-stage3              # Enable DeepSpeed stage 3 parameter and optimizer offloading
 ```
 
 ## Run Models
@@ -61,6 +52,7 @@ python scripts/train.py model_directory/ train.parquet validate.parquet
 Configuration files are stored as `.yaml` files in `model_directory/`:
 
 - `model.yaml`: Contains model hyperparameters.
+- `train.yaml`: Contains training hyperparameters.
 - `peft.yaml`: Contains performance-efficient fine-tuning (PEFT) configurations such as LoRA.
 - `inference.yaml`: Contains model generation parameters such as `chat_format`, `top_p`, `eos_tokens`, etc.
 - `sysprompt.txt`: Stores the system prompt.
@@ -69,7 +61,7 @@ Refer to `models/config.py` for more details.
 
 ## History
 
-This project was originally hosted at [andrew264/SmolLM](https://github.com/andrew264/Smol-LM), but the codebase became too messy, leading to a major rewrite.
+This project was originally hosted at [andrew264/SmolLM](https://github.com/andrew264/Smol-LM), but the codebase became too messy, leading to this major rewrite.
 
 ## Future Plans
 

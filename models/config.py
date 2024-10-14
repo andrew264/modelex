@@ -8,12 +8,15 @@ class Cfg:
 
     @classmethod
     def from_yaml(cls, path: str):
-        with open(path, 'r', encoding='utf-8') as file: data = yaml.safe_load(file)
-        return cls(**data)
+        try:
+            with open(path, 'r', encoding='utf-8') as file: data = yaml.safe_load(file)
+            print(f"Loaded {cls.__name__} from {path}")
+            return cls(**data)
+        except FileNotFoundError: return None
 
     def to_yaml(self, path: str):
         with open(path, 'w', encoding='utf-8') as file: yaml.dump(self.__dict__, file)
-
+    def __str__(self): return '\n'.join(f'{k}: {v}' for k, v in self.__dict__.items())
 
 class ModelCfg(Cfg):
     hidden_size: int = 2048
@@ -37,21 +40,38 @@ class ModelCfg(Cfg):
     attn_out_bias: bool = False
 
     # Tokenizer
-    vocab_size: int = 128256
-    pad_token: Optional[int] = None
+    vocab_size: int = 32000
+    pad_token: int = 0
 
 class TrainCfg(Cfg):
-    num_batch: int = 1
     num_epochs: int = 1
-    enable_checkpointing: bool = True
+    batch_size: int = 1
+    num_accum_steps: int = 1
+    precision: str = "bf16"
+    use_grad_checkpointing: bool = False
+
+    max_pad: bool = False
+    pad_multiplier: int = 1
+
+    use_fused_ce: bool = False
+    use_chunked_ce: bool = False
+    num_output_chunks: int = 1
+
+    learning_rate: float = 5e-5
+    use_scheduler: bool = True
+    warmup_steps: int = 100
+
+    use_stage3: bool = False
 
 class InferenceCfg(Cfg):
-    num_beams: int = 2
     bos_token: int = 128000
     eos_tokens: list[int] = [128001, 128008, 128009]
     pad_token: int = 128004
+
     precision: str = 'bf16'
     chat_format: str = 'llama3'
+
+    num_beams: int = 2
     top_p: float = .95
     top_k: int = 12
     temperature: float = 1.

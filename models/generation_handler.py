@@ -55,6 +55,7 @@ class StoppingCriteriaSub(StoppingCriteria):
 
 class StaticCache(Cache):
     def __init__(self, cfg: ModelCfg, compiled_mode: bool = False, dtype: torch.dtype = torch.bfloat16, batch_size: int = 1, device: Optional[torch.device] = None) -> None:
+        super().__init__()
         self.cfg = cfg
         self.is_compiled = compiled_mode
         self.dtype = dtype
@@ -146,6 +147,7 @@ class ModelGenerationHandler:
 
         model.bos_token_id = self.infer_cfg.bos_token
         model.eval()
+        model.to(dtype=torch.bfloat16)
         model.to(device=self.device)
         gc.collect()
 

@@ -18,8 +18,8 @@ class ModelAPI(ls.LitAPI):
         self.sysprompt: str = ""
         self.assistant_name: str = assistant_name
 
-    def setup(self, devices: str):
-        self.device = devices
+    def setup(self, device: str):
+        self.device = device
         torch.set_float32_matmul_precision('high')
         self.model_handler = ModelGenerationHandler(self.path, self.device)
         self.model_handler.load_model(compiled=False)

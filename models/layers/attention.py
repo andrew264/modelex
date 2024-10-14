@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -9,21 +9,18 @@ from transformers import Cache
 
 from models.config import ModelCfg, PeftCfg
 
-def rotate_half(x: Tensor) -> Tensor:
-    return torch.cat((-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]), dim=-1)
-
-def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, pos_ids: Optional[Tensor] = None, unsqueeze_dim: int = 1) -> Tensor:
-    cos = cos.unsqueeze(unsqueeze_dim)
-    sin = sin.unsqueeze(unsqueeze_dim)
-    q_embed = (q * cos) + (rotate_half(q) * sin)
-    k_embed = (k * cos) + (rotate_half(k) * sin)
-    return q_embed, k_embed
-
 try:
-    from liger_kernel.transformers.rope import liger_rotary_pos_emb
-    apply_rotary_pos_emb = liger_rotary_pos_emb
+    from liger_kernel.transformers.rope import liger_rotary_pos_emb as apply_rotary_pos_emb
 except ImportError:
-    pass
+    def rotate_half(x: Tensor) -> Tensor:
+        return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+
+    def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsqueeze_dim: int = 1) -> Tuple[Tensor, Tensor]:
+        cos = cos.unsqueeze(unsqueeze_dim)
+        sin = sin.unsqueeze(unsqueeze_dim)
+        q_embed = (q * cos) + (rotate_half(q) * sin)
+        k_embed = (k * cos) + (rotate_half(k) * sin)
+        return q_embed, k_embed
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
@@ -70,7 +67,8 @@ class Attention(nn.Module):
             v_bias = state_dict.pop(prefix + 'v_proj.bias')
             state_dict[prefix + 'qkv_proj.bias'] = torch.cat([q_bias, k_bias, v_bias])
 
-    def forward(self, x: Tensor, freqs: Tensor, past_kv: Optional[Cache] = None, attn_mask: Optional[Tensor] = None, cache_position: Optional[Tensor] = None, ) -> Tensor:
+    def forward(self, x: Tensor, freqs: Tensor, past_kv: Optional[Cache] = None, attn_mask: Optional[Tensor] = None,
+                cache_position: Optional[Tensor] = None, ) -> Tensor:
         bsz, seqlen, _ = x.size()
         is_causal = attn_mask is None and seqlen > 1
 
@@ -88,5 +86,6 @@ class Attention(nn.Module):
             v = v.repeat_interleave(self.num_kv_groups, dim=1)
 
         if exists(attn_mask): attn_mask = attn_mask[..., :k.shape[-2]]
-        attn = F.scaled_dot_product_attention(q, k ,v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal).transpose(1, 2).view(bsz, seqlen, self.hidden_size)
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal).transpose(1, 2).view(bsz, seqlen,
+                                                                                                                                    self.hidden_size)
         return self.o_proj(attn)

@@ -5,84 +5,59 @@ import os
 import torch
 import lightning as L
 from torchtune.modules.common_utils import _register_reparametrize_state_dict_hooks
-from torchtune.modules.peft import get_adapter_params, set_trainable_params, load_dora_magnitudes
+from torchtune.modules.peft import get_adapter_params, set_trainable_params
 from lightning.pytorch.strategies import DeepSpeedStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-from models.config import ModelCfg, PeftCfg
-from models.training_model import LLMLit
+from models.config import ModelCfg, PeftCfg, TrainCfg
+from models.training_model import LLMLit, CustomCallback
 from utils import get_state_dict_from_safetensors, safe_save_file, get_state_dict_from_deepspeed_ckpt
 from custom_data import DataModule
 
 torch.set_float32_matmul_precision('high')
 
+def setup_model_for_peft(model: torch.nn.Module, p_cfg: PeftCfg)->None:
+    set_trainable_params(model, get_adapter_params(model))
+    if p_cfg.type == 'dora':
+        for m in model.modules():
+            if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()  # i wish someone made documentation on this ffs
 
-class Range(object):
-    def __init__(self, start, end):
-        self.start = start
-        self.end = end
-
-    def __eq__(self, other): return self.start <= other <= self.end
-
-
-def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: int, accum_steps: int, lr: float,
-         use_scheduler: bool, warmup: int, use_grad_checkpointing: bool, val_interval: float, use_stage3: bool) -> None:
+def main(path: str, train_ds: str, valid_ds: str,) -> None:
+    cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
+    t_cfg = TrainCfg.from_yaml(os.path.join(path, 'train.yaml'))
+    p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
     print('=' * 75)
     print("Path: ", path)
     print("Training dataset: ", train_ds)
     print("Validation dataset: ", valid_ds)
-    print("Device: ", device)
-    print("Batch size: ", bs)
-    print("Epochs: ", epochs)
-    print("Accumulation steps: ", accum_steps)
-    print("Learning Rate: ", lr)
-    print("Using LR Scheduler: ", use_scheduler)
-    print("Scheduler Warmup Steps: ", warmup)
-    print("Using Gradient Checkpointing: ", use_grad_checkpointing)
-    print("Validation Check Interval: ", val_interval)
-    print("Using Stage 3 Offload: ", use_stage3)
+    print(t_cfg)
+    if p_cfg: print(p_cfg)
     print('=' * 75)
-    cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
-    p_cfg = None
-    if os.path.exists(os.path.join(path, 'peft.yaml')):
-        p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
-        print('Peft Config Found')
     model_files = [os.path.abspath(p) for p in glob.glob(os.path.join(path, 'model*.safetensors'))]
-    model_sd = {}
-    if model_files: model_sd = get_state_dict_from_safetensors(model_files)
-    model = LLMLit(cfg=cfg, peft_cfg=p_cfg, lr=lr, use_scheduler=use_scheduler, warmup=warmup, use_grad_checkpointing=use_grad_checkpointing)
+    model_sd = get_state_dict_from_safetensors(model_files)
+    model = LLMLit(cfg=cfg, peft_cfg=p_cfg, train_cfg=t_cfg,).bfloat16()
     if p_cfg and p_cfg.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.model.embed_tokens.weight.dtype)
     _, unexpected = model.load_state_dict(model_sd, strict=False)
     print("Unexpected Keys: ", unexpected)
-    if p_cfg:
-        set_trainable_params(model, get_adapter_params(model))
-        if p_cfg.type == 'dora':
-            for m in model.modules():
-                if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()  # i wish someone made documentation on this ffs
-    datamod = DataModule(train_ds, valid_ds, batch_size=bs, max_seq_length=cfg.max_seq_len, pad_id=cfg.pad_token)
-    if use_stage3:
-        strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True, pin_memory=False)
-        from deepspeed.ops.adam import DeepSpeedCPUAdam
-        model.set_optimizer(DeepSpeedCPUAdam)
-    else:
-        strategy = 'auto'
-        from bitsandbytes.optim.adamw import AdamW8bit
-        model.set_optimizer(AdamW8bit)
+    if p_cfg: setup_model_for_peft(model, p_cfg)
+
+    datamod = DataModule(train_ds, valid_ds, batch_size=t_cfg.batch_size, max_seq_length=cfg.max_seq_len, max_pad=t_cfg.max_pad,
+                         pad_to_multiple_of=t_cfg.pad_multiplier, pad_id=cfg.pad_token)
+
+    if t_cfg.use_stage3:
+        strategy = DeepSpeedStrategy(stage=3, offload_optimizer=True, offload_parameters=True, cpu_checkpointing=True, pin_memory=False)
+    else: strategy = 'auto'
+
     ckpt_path = os.path.join(path, 'checkpoint')
     if not os.path.isdir(ckpt_path): os.mkdir(ckpt_path)
     ckpt_callback = ModelCheckpoint(ckpt_path, save_last=True)
-    trainer = L.Trainer(accelerator="gpu",
-                        strategy=strategy,
-                        precision="bf16-mixed",
-                        max_epochs=epochs,
-                        enable_progress_bar=True,
-                        log_every_n_steps=accum_steps,
-                        gradient_clip_val=1.0,
-                        val_check_interval=val_interval,
-                        accumulate_grad_batches=accum_steps,
-                        callbacks=[ckpt_callback],)
+
+    trainer = L.Trainer(accelerator="gpu", strategy=strategy, precision=t_cfg.precision, max_epochs=t_cfg.num_epochs, enable_progress_bar=True,
+                        log_every_n_steps=t_cfg.num_accum_steps, gradient_clip_val=1.0, accumulate_grad_batches=t_cfg.num_accum_steps,
+                        callbacks=[ckpt_callback, CustomCallback()], )
     trainer.fit(model, train_dataloaders=datamod)
-    if use_stage3:
+
+    if t_cfg.use_stage3:
         del model
         model = LLMLit(cfg=cfg, peft_cfg=p_cfg, ).cpu()
         model.load_state_dict(get_state_dict_from_deepspeed_ckpt(os.path.join(ckpt_path, 'last.ckpt')))
@@ -92,23 +67,10 @@ def main(path: str, train_ds: str, valid_ds: str, device: str, bs: int, epochs: 
     else:
         safe_save_file(model.state_dict(), os.path.join(path, 'model.safetensors'))
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="generate sequence")
     parser.add_argument("path", type=str, help="Path to the model (required)")
     parser.add_argument("train_data", type=str, help="Path to the parquet dataset (required)")
-    parser.add_argument("validation_data", type=str, default=None, help="Path to the parquet dataset (optional)")
-    parser.add_argument("--device", type=str, default="0", help="Device to run the model on (optional, defaults to 'gpu 0')")
-    parser.add_argument("--bs", type=int, default=1, help="Batch size (Defaults to 1)")
-    parser.add_argument("--num-epochs", type=int, default=1, help="Number of epochs (Defaults to 1)")
-    parser.add_argument("--accum-steps", type=int, default=8, help="Gradient Accumulation Steps (Defaults to 1)")
-    parser.add_argument("--learning-rate", "-lr", type=float, default=1e-4, help="Set Learning Rate")
-    parser.add_argument("--use-scheduler", action=argparse.BooleanOptionalAction, default=False, help="Enable LR Scheduler")
-    parser.add_argument("--warmup", type=int, default=100, help="Number of warmup steps")
-    parser.add_argument("--use-grad-checkpointing", action=argparse.BooleanOptionalAction, default=False, help="Enable Gradient Checkpointing")
-    parser.add_argument("--validation-interval", type=float, default=1.0, choices=[Range(0.0, 1.0)], help="Validation Interval")
-    parser.add_argument("--use-stage3", action=argparse.BooleanOptionalAction, default=False, help="Enable Stage 3 Offload")
+    parser.add_argument("--validation", type=str, default="", help="Path to the parquet dataset (optional)")
     args = parser.parse_args()
-    main(args.path, args.train_data, args.validation_data, args.device, args.bs, args.num_epochs, args.accum_steps,
-         args.learning_rate, args.use_scheduler, args.warmup, args.use_grad_checkpointing, args.validation_interval,
-         args.use_stage3)
+    main(args.path, args.train_data, args.validation)
