@@ -52,7 +52,7 @@ def main(path: str, train_ds: str, valid_ds: str,) -> None:
     if not os.path.isdir(ckpt_path): os.mkdir(ckpt_path)
     ckpt_callback = ModelCheckpoint(ckpt_path, save_last=True)
 
-    trainer = L.Trainer(accelerator="gpu", strategy=strategy, precision=t_cfg.precision, max_epochs=t_cfg.num_epochs, enable_progress_bar=True,
+    trainer = L.Trainer(accelerator=t_cfg.accelerator, strategy=strategy, precision=t_cfg.precision, max_epochs=t_cfg.num_epochs, enable_progress_bar=True,
                         log_every_n_steps=t_cfg.num_accum_steps, gradient_clip_val=1.0, accumulate_grad_batches=t_cfg.num_accum_steps,
                         callbacks=[ckpt_callback, CustomCallback()], )
     trainer.fit(model, train_dataloaders=datamod)
@@ -68,7 +68,7 @@ def main(path: str, train_ds: str, valid_ds: str,) -> None:
         safe_save_file(model.state_dict(), os.path.join(path, 'model.safetensors'))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="generate sequence")
+    parser = argparse.ArgumentParser(description="train model")
     parser.add_argument("path", type=str, help="Path to the model (required)")
     parser.add_argument("train_data", type=str, help="Path to the parquet dataset (required)")
     parser.add_argument("--validation", type=str, default="", help="Path to the parquet dataset (optional)")

@@ -25,7 +25,7 @@ def create_instance_from_string(class_path: str, *args):
 
 
 def main(out_file: str, datasets: List[Tuple[str, List[str]]]) -> None:
-    schema = pa.schema([('input_ids', pa.int64()), ('labels', pa.int64()),])
+    schema = pa.schema([('input_ids', pa.int32()), ('labels', pa.int32()),])
     with pq.ParquetWriter(out_file, schema) as writer:
         for d in datasets:
             for item in tqdm(create_instance_from_string(d[0], *d[1])):

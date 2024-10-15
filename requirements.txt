@@ -8,3 +8,7 @@ bitsandbytes
 deepspeed
 torchtune
 datasets
+tokenizers
+pyarrow
+numpy
+llama-cpp-python

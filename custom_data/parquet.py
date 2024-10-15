@@ -1,5 +1,7 @@
 import glob
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
+
+import numpy as np
 import pyarrow.parquet as pq
 from tokenizers import Tokenizer
 
@@ -19,7 +21,7 @@ class ParquetTextDataset:
         self.parquet_cache = {}
     def __len__(self) -> int: return self.total_rows
 
-    def __getitem__(self, idx: int) -> Union[Dict[str, List[int]], str]:
+    def __getitem__(self, idx: int) -> Union[Dict[str, np.ndarray], str]:
         if idx < 0: idx = self.total_rows + idx
         if not 0 <= idx < self.total_rows: raise IndexError("Index out of range")
 
@@ -34,7 +36,8 @@ class ParquetTextDataset:
         text: str = row_group.to_pandas().iloc[row_in_group].text
         if self._tokenizer is not None:
             tokenized = self._tokenizer.encode(text)
-            return {'input_ids': tokenized.ids, 'labels': tokenized.ids}
+            ids = np.array(tokenized.ids, dtype=np.int32)
+            return {'input_ids': ids, 'labels': ids}
         return text
 
     def _binary_search(self, index):

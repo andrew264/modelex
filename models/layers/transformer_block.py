@@ -7,27 +7,27 @@ from torch.utils.checkpoint import checkpoint
 from transformers import Cache, StaticCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 
-from models.config import ModelCfg, PeftCfg
+from models.config import ModelCfg, PeftCfg, TrainCfg
 from models.layers.attention import Attention
 from models.layers.mlp import MLP
 from models.layers.rotary_embedding import RotaryEmbedding
 
-def get_rmsnorm():
+def exists(x: Optional[Any]) -> bool: return x is not None
+def get_rmsnorm(cfg: Optional[TrainCfg] = None):
+    if exists(cfg) and cfg.accelerator == 'cpu': return nn.RMSNorm
     try:
         from liger_kernel.transformers.rms_norm import LigerRMSNorm as RMSNorm
         return RMSNorm
     except ImportError:
         return nn.RMSNorm
 
-def exists(x: Optional[Any]) -> bool: return x is not None
-
 class Block(nn.Module):
-    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None) -> None:
+    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None, train_cfg: Optional[TrainCfg] = None) -> None:
         super().__init__()
-        self.self_attn = Attention(cfg, layer_idx=layer_idx, peft_cfg=peft_cfg)
-        self.mlp = MLP(cfg, peft_cfg=peft_cfg)
+        self.self_attn = Attention(cfg, layer_idx=layer_idx, peft_cfg=peft_cfg, train_cfg=train_cfg)
+        self.mlp = MLP(cfg, peft_cfg=peft_cfg, train_cfg=train_cfg)
 
-        NORM_CLASS = get_rmsnorm()
+        NORM_CLASS = get_rmsnorm(train_cfg)
         self.input_layernorm = NORM_CLASS(cfg.hidden_size, cfg.rms_norm_eps)
         self.post_attention_layernorm = NORM_CLASS(cfg.hidden_size, cfg.rms_norm_eps)
 
@@ -36,12 +36,12 @@ class Block(nn.Module):
         return h + self.mlp(self.post_attention_layernorm(h))
     
 class Transformer(nn.Module):
-    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[None] = None, use_grad_checkpointing: bool = False) -> None:
+    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[None] = None, train_cfg: Optional[TrainCfg] = None) -> None:
         super(Transformer, self).__init__()
-        self.use_grad_checkpointing = use_grad_checkpointing
+        self.use_grad_checkpointing = exists(train_cfg) and train_cfg.use_grad_checkpointing
         self.embed_tokens = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
-        self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg) for idx in range(cfg.num_layers)])
-        self.norm = get_rmsnorm()(cfg.hidden_size, eps=cfg.rms_norm_eps)
+        self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg, train_cfg) for idx in range(cfg.num_layers)])
+        self.norm = get_rmsnorm(train_cfg)(cfg.hidden_size, eps=cfg.rms_norm_eps)
         self.rotary_emb = RotaryEmbedding(dim=cfg.hidden_size//cfg.num_heads, base=cfg.rope_theta)
 
     def forward(self, x: Tensor, pos_ids: Optional[Tensor]=None, cache_position: Optional[Tensor]=None, attn_mask: Optional[Tensor]=None, past_kv: Optional[Cache]=None) -> Tensor:

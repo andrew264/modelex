@@ -2,8 +2,9 @@ import datetime
 import glob
 import json
 import os
-from typing import Dict, List, TypedDict
+from typing import Dict, List, Type, TypedDict
 
+import numpy as np
 from tokenizers import Tokenizer
 
 from custom_data.prompt_format import ChatFormatType, ChatFormat, Llama3Format, Gemma2Format, CustomFormat
@@ -29,9 +30,9 @@ class Conversations(ChatFormat):
             case ChatFormatType.GEMMA2.value: self._apply_format(Gemma2Format)
             case ChatFormatType.CUSTOM.value: self._apply_format(CustomFormat)
             case _: raise ValueError(f"Unknown chat_format: {chat_format}")
-    def _apply_format(self, fmt: ChatFormat): self.BOT, self.EOT, self.SH, self.EH = fmt.BOT, fmt.EOT, fmt.SH, fmt.EH
+    def _apply_format(self, fmt: Type[ChatFormat]): self.BOT, self.EOT, self.SH, self.EH = fmt.BOT, fmt.EOT, fmt.SH, fmt.EH
     def __len__(self,)->int: return len(self._files)
-    def _get_encoded(self, data: List[Message]) -> Dict[str, List[int]]:
+    def _get_encoded(self, data: List[Message]) -> Dict[str, np.ndarray]:
         ids, labels = [], []
         sp = self._tokenizer.encode(f'{self.BOT}{self.SH}system{self.EH}{self._sysprompt}{self.EOT}'.strip(), add_special_tokens=False)
         ids.extend(sp.ids)
@@ -43,7 +44,7 @@ class Conversations(ChatFormat):
             ids.extend(combined)
             if msg['user'] == self._assistant_name: labels.extend(([self.CROSS_ENTROPY_IGNORE_IDX] * len(u.ids)) + m.ids)
             else: labels.extend([self.CROSS_ENTROPY_IGNORE_IDX] * len(combined))
-        return {'input_ids': ids, 'labels': labels}
+        return {'input_ids': np.array(ids, dtype=np.int32), 'labels': np.array(labels, dtype=np.int32)}
     def __getitem__(self, idx: int) -> Dict[str, List[int]]:
         try:
             with open(self._files[idx], 'r', encoding='utf-8') as f: data = json.load(f)

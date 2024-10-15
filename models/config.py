@@ -49,6 +49,7 @@ class TrainCfg(Cfg):
     num_accum_steps: int = 1
     precision: str = "bf16"
     use_grad_checkpointing: bool = False
+    accelerator: str = "gpu"
 
     max_pad: bool = False
     pad_multiplier: int = 1
@@ -59,9 +60,12 @@ class TrainCfg(Cfg):
 
     learning_rate: float = 5e-5
     use_scheduler: bool = True
-    warmup_steps: int = 100
+    warmup_ratio: float = .1
 
     use_stage3: bool = False
+
+    use_kd: bool = False
+    kll_loss_ratio: float = .5
 
 class InferenceCfg(Cfg):
     bos_token: int = 128000
