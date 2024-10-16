@@ -1,17 +1,17 @@
-from typing import Optional
-
 import yaml
 
 class Cfg:
     def __init__(self, **kwargs):
         for key, value in kwargs.items(): setattr(self, key, value)
-
+    def checks(self): return
     @classmethod
     def from_yaml(cls, path: str):
         try:
             with open(path, 'r', encoding='utf-8') as file: data = yaml.safe_load(file)
             print(f"Loaded {cls.__name__} from {path}")
-            return cls(**data)
+            obj = cls(**data)
+            cls.checks(obj)
+            return obj
         except FileNotFoundError: return None
 
     def to_yaml(self, path: str):
@@ -48,8 +48,10 @@ class TrainCfg(Cfg):
     batch_size: int = 1
     num_accum_steps: int = 1
     precision: str = "bf16"
-    use_grad_checkpointing: bool = False
     accelerator: str = "gpu"
+
+    offload_activations: bool = False
+    use_grad_checkpointing: bool = False
 
     max_pad: bool = False
     pad_multiplier: int = 1
@@ -66,6 +68,20 @@ class TrainCfg(Cfg):
 
     use_kd: bool = False
     kll_loss_ratio: float = .5
+
+    def checks(self):
+        assert 0 <= self.kll_loss_ratio <= 1., "kll_loss_ratio must be between 0 and 1"
+        assert 0 <= self.warmup_ratio <= 1., "warmup_ratio must be between 0 and 1"
+        assert self.offload_activations and self.use_grad_checkpointing, "nuh uh; use either `offload_activations` or `use_grad_checkpointing`, not both at the same time"
+        if self.accelerator == 'cpu':
+            assert self.offload_activations is False, "can't offload activations when training with cpu"
+            assert self.use_stage3 is False, "no stage3 for cpu training"
+        if self.use_fused_ce:
+            assert self.use_kd is False, "can't compute logits when using fused crossentropy, which is required for knowledge distillation"
+            assert self.use_chunked_ce is False, "nuh uh; use either `use_fused_ce` or `use_chunked_ce`, not both at the same time"
+        if self.use_chunked_ce:
+            assert self.num_output_chunks > 1, "if you gonna use chunking you must also set the number of chunks"
+            assert self.max_pad or self.pad_multiplier > 1, "uhm, make sure you pad sequence length properly before we chunk them into equal length"
 
 class InferenceCfg(Cfg):
     bos_token: int = 128000

@@ -1,3 +1,4 @@
+import contextlib
 from functools import partial
 from typing import Any, List, Optional, Tuple, Union
 
@@ -6,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torchtune.modules import get_cosine_schedule_with_warmup, TiedLinear
+from torchtune.training import OffloadActivations
 
 from models.config import ModelCfg, PeftCfg, TrainCfg
 from models.layers.transformer_block import Transformer
@@ -19,7 +21,6 @@ class LLMLit(L.LightningModule):
         peft_cfg: Optional[PeftCfg] = kwargs.pop('peft_cfg', None)
         train_cfg: TrainCfg = kwargs.pop('train_cfg')
         super().__init__(*args, **kwargs)
-        if train_cfg.use_fused_ce and train_cfg.use_chunked_ce: raise ValueError('nuh uh; use either fused_ce or chunked_ce')
         self.cfg = cfg
         self.peft_cfg = peft_cfg
         self.train_cfg = train_cfg
@@ -45,6 +46,9 @@ class LLMLit(L.LightningModule):
 
         self._setup_loss_fn()
         self.ignore_labels_cache = torch.full((train_cfg.batch_size, 1), self.loss.ignore_index, device=self.device)
+        self.activations_handling_ctx = contextlib.nullcontext()
+        if train_cfg.offload_activations:
+            self.activations_handling_ctx = OffloadActivations()
 
     def _init_weights(self, module):
         std = self.cfg.initializer_range
@@ -70,7 +74,9 @@ class LLMLit(L.LightningModule):
         if train_cfg.use_kd:
             if train_cfg.use_chunked_ce:
                 from torchtune.modules.loss import ForwardKLWithChunkedOutputLoss
-                self.kld_loss = ForwardKLWithChunkedOutputLoss(num_output_chunks=train_cfg.num_output_chunks, ignore_index=-100)
+                kld_loss = ForwardKLWithChunkedOutputLoss(num_output_chunks=train_cfg.num_output_chunks, ignore_index=-100)
+                kld_loss.fkl_loss = torch.compile(kld_loss.fkl_loss)
+                self.kld_loss = kld_loss
             else:
                 from torchtune.modules.loss import ForwardKLLoss
                 self.kld_loss = ForwardKLLoss(ignore_index=-100)
@@ -103,17 +109,19 @@ class LLMLit(L.LightningModule):
             loss = self.kld_loss(logits, teacher_logits, labels)
         return loss
 
-    def forward(self, x: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None, teacher_logits: Optional[Tensor] = None, ) -> Tensor:
-        x = self.model(x=x, attn_mask=attn_mask)
+    def forward(self, x: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None, teacher_logits: Optional[Tensor] = None, ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+        with self.activations_handling_ctx:
+            x = self.model(x=x, attn_mask=attn_mask)
         labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[: labels.shape[0]])).contiguous()
         logits, class_loss = self._loss_fn(x, labels)
         if self.train_cfg.use_kd:
             kd_loss = self._kd_loss_fn(logits, teacher_logits, labels)
-            loss = (1 - self.train_cfg.kll_loss_ratio) * class_loss + self.train_cfg.kll_loss_ratio * kd_loss
+            total_loss = (1 - self.train_cfg.kll_loss_ratio) * class_loss + self.train_cfg.kll_loss_ratio * kd_loss
         else:
-            loss = class_loss
+            kd_loss = None
+            total_loss = class_loss
         del teacher_logits
-        return loss
+        return total_loss, class_loss, kd_loss
 
     def training_step(self, batch: dict):
         input_ids = batch.get("input_ids")
@@ -121,10 +129,10 @@ class LLMLit(L.LightningModule):
         attention_mask = batch.get("attention_mask", None)
         teacher_logits = batch.get("teacher_logits", None)
 
-        loss = self(input_ids, labels, attention_mask, teacher_logits)
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
-        self.log("train_ppl", torch.exp(loss), prog_bar=True, sync_dist=True)
-        return loss
+        total_loss, class_loss, kd_loss = self(input_ids, labels, attention_mask, teacher_logits)
+        log = dict(loss=total_loss, perplexity=torch.exp(total_loss), class_loss=class_loss, kd_loss=kd_loss,)
+        self.log_dict(log, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
+        return total_loss
 
     def validation_step(self, batch: dict):
         input_ids = batch.get("input_ids")
@@ -132,10 +140,10 @@ class LLMLit(L.LightningModule):
         attention_mask = batch.get("attention_mask", None)
         teacher_logits = batch.get("teacher_logits", None)
 
-        loss = self(input_ids, labels, attention_mask, teacher_logits)
-        self.log("train_loss", loss, prog_bar=True, sync_dist=True)
-        self.log("train_ppl", torch.exp(loss), prog_bar=True, sync_dist=True)
-        return loss
+        total_loss, class_loss, kd_loss = self(input_ids, labels, attention_mask, teacher_logits)
+        log = dict(loss=total_loss, perplexity=torch.exp(total_loss), class_loss=class_loss, kd_loss=kd_loss, )
+        self.log_dict(log, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
+        return total_loss
 
     def configure_optimizers(self):
         if self.train_cfg.accelerator == 'cpu':
@@ -146,7 +154,8 @@ class LLMLit(L.LightningModule):
         else:
             from bitsandbytes.optim.adamw import PagedAdamW8bit as Optimizer
 
-        optimizer = Optimizer(self.parameters(), lr=self.train_cfg.learning_rate, weight_decay=0.1, betas=(0.9, 0.95), )
+        params_to_optimize = filter(lambda p: p.requires_grad, self.parameters())
+        optimizer = Optimizer(params_to_optimize, lr=self.train_cfg.learning_rate, weight_decay=0.1, betas=(0.9, 0.95), )
         if self.train_cfg.use_scheduler:
             steps = self.trainer.estimated_stepping_batches
             warmup = int(self.train_cfg.warmup_ratio * steps)

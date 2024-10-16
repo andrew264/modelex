@@ -52,8 +52,7 @@ class Transformer(nn.Module):
         freqs = self.rotary_emb(pos_ids)
 
         for layer in self.layers:
-            if self.training and self.use_grad_checkpointing: x = checkpoint(layer, x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position, use_reentrant=False)
-            else: x = layer(x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position)
+            x = layer(x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position)
         return self.norm(x)
     
 def _update_causal_mask(attn_mask: torch.Tensor, input_tensor: torch.Tensor, cache_position: torch.Tensor, past_kv: Cache,) -> Optional[Tensor]:
