@@ -10,7 +10,10 @@ from torchtune.modules import get_cosine_schedule_with_warmup, TiedLinear
 from torchtune.training import OffloadActivations
 
 from models.config import ModelCfg, PeftCfg, TrainCfg
+from models.gguf_logits import GGUFModelLogits
 from models.layers.transformer_block import Transformer
+
+def exists(x: Optional[Any]) -> bool: return x is not None
 
 class TiedLinear2(TiedLinear):
     @property
@@ -34,8 +37,10 @@ class LLMLit(L.LightningModule):
         self.model = Transformer(cfg=cfg, peft_cfg=peft_cfg, train_cfg=train_cfg)
         if not self.tie_word_embeddings:
             if peft_cfg and 'lm_head' in peft_cfg.layers:
-                if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
-                else: from torchtune.modules.peft import LoRALinear as Linear
+                if peft_cfg.type == 'dora':
+                    from torchtune.modules.peft import DoRALinear as Linear
+                else:
+                    from torchtune.modules.peft import LoRALinear as Linear
                 Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
                 self.lm_head = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
             else:
@@ -46,18 +51,23 @@ class LLMLit(L.LightningModule):
 
         self._setup_loss_fn()
         self.ignore_labels_cache = torch.full((train_cfg.batch_size, 1), self.loss.ignore_index, device=self.device)
+
         self.activations_handling_ctx = contextlib.nullcontext()
-        if train_cfg.offload_activations:
+        if train_cfg.offload_activations:  # Activation Context
             self.activations_handling_ctx = OffloadActivations()
+
+        self.teacher_model = None
+        if train_cfg.is_online_kd:  # Setup Teacher Model if Necessary
+            self.teacher_model = GGUFModelLogits(train_cfg.teacher_model, cfg.max_seq_len)
 
     def _init_weights(self, module):
         std = self.cfg.initializer_range
         if isinstance(module, nn.Linear):
             module.weight.data.normal_(mean=0.0, std=std)
-            if module.bias is not None: module.bias.data.zero_()
+            if exists(module.bias): module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
             module.weight.data.normal_(mean=0.0, std=std)
-            if module.padding_idx is not None: module.weight.data[module.padding_idx].zero_()
+            if exists(module.padding_idx): module.weight.data[module.padding_idx].zero_()
 
     def _setup_loss_fn(self):
         train_cfg = self.train_cfg
@@ -81,46 +91,50 @@ class LLMLit(L.LightningModule):
                 from torchtune.modules.loss import ForwardKLLoss
                 self.kld_loss = ForwardKLLoss(ignore_index=-100)
 
-    def _loss_fn(self, x: Tensor, labels: Tensor) -> Tuple[Optional[Tensor], Tensor]:
-        if self.use_fused_ce:
-            x = x.contiguous().view(-1, self.cfg.hidden_size)
-            loss = self.loss(self.lm_head.weight, x, labels.view(-1))
-            logits = None
-        elif self.use_chunked_ce:
-            logits = [self.lm_head(chunk) for chunk in x.chunk(self.train_cfg.num_output_chunks, dim=1)]
-            loss = self.loss(logits, labels)
-        else:
-            logits = self.lm_head(x)
-            loss = self.loss(logits.contiguous().view(-1, self.cfg.vocab_size), labels.view(-1))
-        return logits, loss
+    def _kd_loss_fn(self, input_ids: Tensor, logits: Optional[Union[Tensor, List[Tensor]]], teacher_logits: Optional[Tensor], labels: Tensor) -> Tensor:
+        assert exists(logits), "Student logits are required for Knowledge Distillation, Logits are not materialized for Fused CrossEntropy"
 
-    def _kd_loss_fn(self, logits: Optional[Union[Tensor, List[Tensor]]], teacher_logits: Optional[Tensor], labels: Tensor) -> Tensor:
-        if logits is None:
-            raise ValueError('Student Logits are missing for Knowledge Distillation, Logits are not materialized for Fused CrossEntropy')
-        if teacher_logits is None:
-            raise ValueError('Teacher Logits not Found')
-        if self.use_chunked_ce:
+        if not exists(teacher_logits):
+            assert exists(self.teacher_model), "Please define 'teacher_model' in TrainCfg or provide 'teacher_logits' in the dataset."
+            teacher_logits = self.teacher_model(input_ids).to(device=logits.device)
+
+        if self.use_chunked_ce:  # Chunked KLD Loss
             chunk_size = self.train_cfg.num_output_chunks
             teacher_logits = [chunk for chunk in teacher_logits.chunk(chunk_size, dim=1)]
-            if not isinstance(logits, list):
-                logits = [chunk for chunk in logits.chunk(chunk_size)]
+            if not isinstance(logits, list): logits = [chunk for chunk in logits.chunk(chunk_size)]
+
             loss = self.kld_loss(logits, teacher_logits, labels)
-        else:
+        else:  # Standard KLD Loss
             loss = self.kld_loss(logits, teacher_logits, labels)
+
+        del teacher_logits
         return loss
 
-    def forward(self, x: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None, teacher_logits: Optional[Tensor] = None, ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
-        with self.activations_handling_ctx:
-            x = self.model(x=x, attn_mask=attn_mask)
-        labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[: labels.shape[0]])).contiguous()
-        logits, class_loss = self._loss_fn(x, labels)
+    def forward(self, input_ids: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None,
+                teacher_logits: Optional[Tensor] = None, ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+        labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[:labels.shape[0]])).contiguous()  # Shifting Labels
+
+        with self.activations_handling_ctx:  # Forward Pass
+            x = self.model(x=input_ids, attn_mask=attn_mask)
+
+        if self.use_fused_ce:  # Fused CE
+            x = x.contiguous().view(-1, self.cfg.hidden_size)
+            loss = self.loss(self.lm_head.weight, x, labels.view(-1))
+            return loss, None, None
+
+        if self.use_chunked_ce:  # Chunked CE
+            logits = [self.lm_head(chunk) for chunk in x]
+            class_loss = self.loss(logits, labels)
+        else:  # Normal CE
+            logits = self.lm_head(x)
+            class_loss = self.loss(logits.contiguous().view(-1, self.cfg.vocab_size), labels.view(-1))
+
+        kd_loss = None
+        total_loss = class_loss
         if self.train_cfg.use_kd:
-            kd_loss = self._kd_loss_fn(logits, teacher_logits, labels)
+            kd_loss = self._kd_loss_fn(input_ids, logits, teacher_logits, labels)
             total_loss = (1 - self.train_cfg.kll_loss_ratio) * class_loss + self.train_cfg.kll_loss_ratio * kd_loss
-        else:
-            kd_loss = None
-            total_loss = class_loss
-        del teacher_logits
+
         return total_loss, class_loss, kd_loss
 
     def training_step(self, batch: dict):
@@ -130,7 +144,9 @@ class LLMLit(L.LightningModule):
         teacher_logits = batch.get("teacher_logits", None)
 
         total_loss, class_loss, kd_loss = self(input_ids, labels, attention_mask, teacher_logits)
-        log = dict(loss=total_loss, perplexity=torch.exp(total_loss), class_loss=class_loss, kd_loss=kd_loss,)
+        log = dict(loss=total_loss, perplexity=torch.exp(total_loss))
+        if exists(kd_loss):
+            log |= dict(class_loss=class_loss, kd_loss=kd_loss)
         self.log_dict(log, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
         return total_loss
 
@@ -141,7 +157,9 @@ class LLMLit(L.LightningModule):
         teacher_logits = batch.get("teacher_logits", None)
 
         total_loss, class_loss, kd_loss = self(input_ids, labels, attention_mask, teacher_logits)
-        log = dict(loss=total_loss, perplexity=torch.exp(total_loss), class_loss=class_loss, kd_loss=kd_loss, )
+        log = dict(loss=total_loss, perplexity=torch.exp(total_loss))
+        if exists(kd_loss):
+            log |= dict(class_loss=class_loss, kd_loss=kd_loss)
         self.log_dict(log, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
         return total_loss
 

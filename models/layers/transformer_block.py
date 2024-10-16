@@ -13,6 +13,7 @@ from models.layers.mlp import MLP
 from models.layers.rotary_embedding import RotaryEmbedding
 
 def exists(x: Optional[Any]) -> bool: return x is not None
+
 def get_rmsnorm(cfg: Optional[TrainCfg] = None):
     if exists(cfg) and cfg.accelerator == 'cpu': return nn.RMSNorm
     try:
@@ -31,20 +32,23 @@ class Block(nn.Module):
         self.input_layernorm = NORM_CLASS(cfg.hidden_size, cfg.rms_norm_eps)
         self.post_attention_layernorm = NORM_CLASS(cfg.hidden_size, cfg.rms_norm_eps)
 
-    def forward(self, x: Tensor, freqs: Tensor, past_kv: Optional[Cache] = None, attn_mask: Optional[Tensor] = None, cache_position: Optional[Tensor] = None, ) -> Tensor:
+    def forward(self, x: Tensor, freqs: Tensor, past_kv: Optional[Cache] = None, attn_mask: Optional[Tensor] = None,
+                cache_position: Optional[Tensor] = None, ) -> Tensor:
         h = x + self.self_attn(self.input_layernorm(x), freqs=freqs, past_kv=past_kv, attn_mask=attn_mask, cache_position=cache_position)
         return h + self.mlp(self.post_attention_layernorm(h))
-    
+
 class Transformer(nn.Module):
     def __init__(self, cfg: ModelCfg, peft_cfg: Optional[None] = None, train_cfg: Optional[TrainCfg] = None) -> None:
         super(Transformer, self).__init__()
         self.use_grad_checkpointing = exists(train_cfg) and train_cfg.use_grad_checkpointing
+        self.num_chunks: Optional[int] = train_cfg.num_output_chunks if exists(train_cfg) and train_cfg.use_chunked_ce else None
         self.embed_tokens = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
         self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg, train_cfg) for idx in range(cfg.num_layers)])
         self.norm = get_rmsnorm(train_cfg)(cfg.hidden_size, eps=cfg.rms_norm_eps)
-        self.rotary_emb = RotaryEmbedding(dim=cfg.hidden_size//cfg.num_heads, base=cfg.rope_theta)
+        self.rotary_emb = RotaryEmbedding(dim=cfg.hidden_size // cfg.num_heads, base=cfg.rope_theta)
 
-    def forward(self, x: Tensor, pos_ids: Optional[Tensor]=None, cache_position: Optional[Tensor]=None, attn_mask: Optional[Tensor]=None, past_kv: Optional[Cache]=None) -> Tensor:
+    def forward(self, x: Tensor, pos_ids: Optional[Tensor] = None, cache_position: Optional[Tensor] = None, attn_mask: Optional[Tensor] = None,
+                past_kv: Optional[Cache] = None) -> Tensor:
         x = self.embed_tokens(x)
         if pos_ids is None: pos_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0)
         if exists(attn_mask) and cache_position is None: cache_position = torch.arange(x.shape[1], device=x.device)
@@ -53,9 +57,11 @@ class Transformer(nn.Module):
 
         for layer in self.layers:
             x = layer(x=x, freqs=freqs, past_kv=past_kv, attn_mask=causal_mask, cache_position=cache_position)
-        return self.norm(x)
-    
-def _update_causal_mask(attn_mask: torch.Tensor, input_tensor: torch.Tensor, cache_position: torch.Tensor, past_kv: Cache,) -> Optional[Tensor]:
+        x = self.norm(x)
+        if exists(self.num_chunks): x = [chunk for chunk in x.chunk(self.num_chunks, dim=1)]
+        return x
+
+def _update_causal_mask(attn_mask: torch.Tensor, input_tensor: torch.Tensor, cache_position: torch.Tensor, past_kv: Cache, ) -> Optional[Tensor]:
     past_seen_tokens = past_kv.get_seq_length() if exists(past_kv) else 0
     using_static_cache = isinstance(past_kv, StaticCache)
 
@@ -67,15 +73,16 @@ def _update_causal_mask(attn_mask: torch.Tensor, input_tensor: torch.Tensor, cac
     if using_static_cache: target_length = past_kv.get_max_length()
     else: target_length = attn_mask.shape[-1] if isinstance(attn_mask, torch.Tensor) else past_seen_tokens + seqlen + 1
 
-    causal_mask = _prepare_4d_causal_attention_mask_with_cache_position(attn_mask,
-        seqlen=seqlen, target_length=target_length, dtype=dtype, device=device, min_dtype=min_dtype, cache_position=cache_position, bsz=input_tensor.shape[0],)
+    causal_mask = _prepare_4d_causal_attention_mask_with_cache_position(attn_mask, seqlen=seqlen, target_length=target_length, dtype=dtype,
+                                                                        device=device, min_dtype=min_dtype, cache_position=cache_position,
+                                                                        bsz=input_tensor.shape[0], )
 
     if exists(attn_mask) and attn_mask.device.type == "cuda": causal_mask = AttentionMaskConverter._unmask_unattended(causal_mask, min_dtype)
 
     return causal_mask
-    
-def _prepare_4d_causal_attention_mask_with_cache_position(
-    attn_mask: torch.Tensor, seqlen: int, target_length: int, dtype: torch.dtype, device: torch.device, min_dtype: float, cache_position: torch.Tensor, bsz: int,) -> Tensor:
+
+def _prepare_4d_causal_attention_mask_with_cache_position(attn_mask: torch.Tensor, seqlen: int, target_length: int, dtype: torch.dtype,
+        device: torch.device, min_dtype: float, cache_position: torch.Tensor, bsz: int, ) -> Tensor:
     if exists(attn_mask) and attn_mask.dim() == 4:
         causal_mask = attn_mask
     else:

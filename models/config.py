@@ -67,13 +67,18 @@ class TrainCfg(Cfg):
     use_stage3: bool = False
 
     use_kd: bool = False
+    teacher_model: str = ""
     kll_loss_ratio: float = .5
+
+    @property
+    def is_online_kd(self) -> bool: return self.teacher_model and self.use_kd
 
     def checks(self):
         assert 0 <= self.kll_loss_ratio <= 1., "kll_loss_ratio must be between 0 and 1"
         assert 0 <= self.warmup_ratio <= 1., "warmup_ratio must be between 0 and 1"
-        assert self.offload_activations and self.use_grad_checkpointing, "nuh uh; use either `offload_activations` or `use_grad_checkpointing`, not both at the same time"
+        assert not(self.offload_activations and self.use_grad_checkpointing), "nuh uh; use either `offload_activations` or `use_grad_checkpointing`, not both at the same time"
         if self.accelerator == 'cpu':
+            assert self.use_fused_ce is False, "can't do fused crossentropy in cpu"
             assert self.offload_activations is False, "can't offload activations when training with cpu"
             assert self.use_stage3 is False, "no stage3 for cpu training"
         if self.use_fused_ce:

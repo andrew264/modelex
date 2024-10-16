@@ -40,21 +40,25 @@ class Attention(nn.Module):
         qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
         self.apply_rotary_pos_emb = get_pos_emb_fn(train_cfg)
 
+        hidden = cfg.hidden_size
         if peft_cfg:
-            if peft_cfg.type == 'dora': from torchtune.modules.peft import DoRALinear as Linear
-            else: from torchtune.modules.peft import LoRALinear as Linear
+            if peft_cfg.type == 'dora':
+                from torchtune.modules.peft import DoRALinear as Linear
+            else:
+                from torchtune.modules.peft import LoRALinear as Linear
             Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
+
             if 'qkv_proj' in peft_cfg.layers:
-                self.qkv_proj = Linear(in_dim=cfg.hidden_size, out_dim=qkv_out_dim, use_bias=cfg.attn_qkv_bias)
+                self.qkv_proj = Linear(in_dim=hidden, out_dim=qkv_out_dim, use_bias=cfg.attn_qkv_bias)
             else:
-                self.qkv_proj = nn.Linear(in_features=cfg.hidden_size, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias)
+                self.qkv_proj = nn.Linear(hidden, qkv_out_dim, bias=cfg.attn_qkv_bias)
             if 'o_proj' in peft_cfg.layers:
-                self.o_proj = Linear(in_dim=cfg.hidden_size, out_dim=cfg.hidden_size, use_bias=cfg.attn_out_bias)
+                self.o_proj = Linear(in_dim=hidden, out_dim=hidden, use_bias=cfg.attn_out_bias)
             else:
-                self.o_proj = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.hidden_size, bias=cfg.attn_out_bias)
+                self.o_proj = nn.Linear(hidden, hidden, bias=cfg.attn_out_bias)
         else:
-            self.qkv_proj = nn.Linear(in_features=cfg.hidden_size, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias)
-            self.o_proj = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.hidden_size, bias=cfg.attn_out_bias)
+            self.qkv_proj = nn.Linear(hidden, qkv_out_dim, bias=cfg.attn_qkv_bias)
+            self.o_proj = nn.Linear(hidden, hidden, bias=cfg.attn_out_bias)
         self._register_load_state_dict_pre_hook(self.fused_qkv_hook)
 
     @staticmethod
