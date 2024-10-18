@@ -126,7 +126,10 @@ class ModelGenerationHandler:
     def load_model(self, compiled: bool = False,):
         self.cfg = ModelCfg.from_yaml(os.path.join(self.path, 'model.yaml'))
         self.infer_cfg = InferenceCfg.from_yaml(os.path.join(self.path, 'inference.yaml'))
-        self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
+        tokenizer_path = os.path.join(self.path, 'tokenizer.json')
+        self.tokenizer = None
+        if os.path.exists(tokenizer_path):
+            self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
         p_cfg = None
         if os.path.exists(os.path.join(self.path, 'peft.yaml')):
             p_cfg = PeftCfg.from_yaml(os.path.join(self.path, 'peft.yaml'))
@@ -166,7 +169,7 @@ class ModelGenerationHandler:
 
     def get_gen_config(self, max_new_tokens: Optional[int] = 512):
         cfg = self.infer_cfg
-        return GenerationConfig(max_new_tokens=max_new_tokens, do_sample=True, num_beams=cfg.num_beams, use_cache=True, pad_token_id=cfg.pad_token, bos_token_id=cfg.bos_token, eos_token_id=cfg.eos_tokens)
+        return GenerationConfig(max_new_tokens=max_new_tokens, do_sample=cfg.do_sample, num_beams=cfg.num_beams, use_cache=True, pad_token_id=cfg.pad_token, bos_token_id=cfg.bos_token, eos_token_id=cfg.eos_tokens)
 
     def _get_stop_criteria(self, ):
         stopping_tokens: List[torch.Tensor] = [torch.tensor([eot], device=self.device) for eot in self.infer_cfg.eos_tokens]
@@ -174,9 +177,11 @@ class ModelGenerationHandler:
 
     def set_processor(self):
         cfg = self.infer_cfg
-        self.processor = LogitsProcessorList([TemperatureRangeLogitsWarper(cfg.temperature, 0.9, 24),
-                                              TopPLogitsWarper(top_p=cfg.top_p),
-                                              TopKLogitsWarper(top_k=cfg.top_k),])
+        processors = []
+        if cfg.temperature > 0.: processors.append(TemperatureRangeLogitsWarper(cfg.temperature, cfg.temperature/2, 24))
+        if cfg.top_k > 0: processors.append(TopKLogitsWarper(top_k=cfg.top_k))
+        if cfg.top_p < 1.: processors.append(TopPLogitsWarper(top_p=cfg.top_p))
+        self.processor = LogitsProcessorList(processors)
 
     def _compile_model(self):
         print('Compiling...')
@@ -189,15 +194,22 @@ class ModelGenerationHandler:
 
         print(f'Compiled in {time.time() - start:.3f}s')
 
-    def generate(self, prompt: str, max_new_tokens: int = 512) -> Tuple[str, int, int, float]:
+    def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False) -> Tuple[Union[str, List[int]], int, int, float]:
         self.cache.reset()
         gc.collect()
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
-        encoded = self.tokenizer.encode(prompt, add_special_tokens=False)
-        tokens = torch.tensor([encoded.ids]).to(self.device)
-        attention_mask = torch.tensor([encoded.attention_mask]).to(self.device)
+        if isinstance(prompt, str):
+            assert exists(self.tokenizer), "Tokenizer not found"
+            encoded = self.tokenizer.encode(prompt, add_special_tokens=False)
+            encoded_len = len(encoded.ids)
+            tokens = torch.tensor([encoded.ids], device=self.device)
+            attention_mask = torch.tensor([encoded.attention_mask], device=self.device)
+        else:
+            tokens = torch.tensor([prompt], device=self.device)
+            encoded_len = len(prompt)
+            attention_mask = torch.tensor([[1]*len(prompt)], device=self.device)
 
         start = time.time()
         out = self.model.generate(input_ids=tokens,
@@ -208,8 +220,10 @@ class ModelGenerationHandler:
                                   stopping_criteria=self.stopping_criteria)[0].tolist()
 
         total_tokens = len(out)
-        out_tokens = out[len(encoded.ids):]
-        decoded = self.tokenizer.decode(out_tokens, skip_special_tokens=True)
+        out_tokens = out[encoded_len:]
         generation_time = time.time() - start
 
+        if return_tokens: return out_tokens, len(out_tokens), total_tokens, generation_time
+
+        decoded = self.tokenizer.decode(out_tokens, skip_special_tokens=True)
         return decoded, len(out_tokens), total_tokens, generation_time

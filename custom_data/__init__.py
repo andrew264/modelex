@@ -41,14 +41,14 @@ def get_padded_ids_and_labels(batch: BatchType, max_len: int) -> Tuple[Tensor, T
     return torch.stack(ids, dim=0), torch.stack(labels, dim=0)
 
 class DataModule(L.LightningDataModule):
-    def __init__(self, train_ds_file: str, valid_ds_file: Optional[str], batch_size: int, max_seq_length: int, max_pad: bool = False,
+    def __init__(self, train_ds: Dataset, valid_ds: Optional[Dataset], batch_size: int, max_seq_length: int, max_pad: bool = False,
                  pad_to_multiple_of: int = 1, pad_id: int = 0):
         super().__init__()
         self.batch_size = batch_size
         self.max_seq_length = max_seq_length
         self.max_pad = max_pad
-        self.train_ds = ParquetCustomDataReader(train_ds_file)
-        self.valid_ds = ParquetCustomDataReader(valid_ds_file) if valid_ds_file else []
+        self.train_ds = train_ds
+        self.valid_ds = valid_ds if exists(valid_ds) else []
         if max_pad:  # pad everything to max_length
             self.collate_fn = partial(self.collate_max_pad_fn, max_seq_length, pad_id)
         elif pad_to_multiple_of > 1:  # pad everything to min(max_length, max multiple length of item in batch)
@@ -64,7 +64,7 @@ class DataModule(L.LightningDataModule):
         input_ids, labels = get_padded_ids_and_labels(batch, max_len)
         attention_mask = (input_ids != torch.tensor(pad_id, dtype=input_ids.dtype)).long()
 
-        if len(batch) == 1 and attention_mask.sum().item() == attention_mask.numel(): attention_mask = None
+        if len(batch) == 1 or attention_mask.sum().item() == attention_mask.numel(): attention_mask = None
 
         return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask, "teacher_logits": teacher_logits}
 

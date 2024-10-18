@@ -100,6 +100,7 @@ class InferenceCfg(Cfg):
     top_p: float = .95
     top_k: int = 12
     temperature: float = 1.
+    do_sample: bool = False
 
 class PeftCfg(Cfg):
     type: str = 'lora'

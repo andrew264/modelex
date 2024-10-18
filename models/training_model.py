@@ -147,7 +147,7 @@ class LLMLit(L.LightningModule):
         log = dict(loss=total_loss, perplexity=torch.exp(total_loss))
         if exists(kd_loss):
             log |= dict(class_loss=class_loss, kd_loss=kd_loss)
-        self.log_dict(log, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
+        self.log_dict(log, prog_bar=True, on_step=True, on_epoch=True, sync_dist=True)
         return total_loss
 
     def validation_step(self, batch: dict):
@@ -157,10 +157,10 @@ class LLMLit(L.LightningModule):
         teacher_logits = batch.get("teacher_logits", None)
 
         total_loss, class_loss, kd_loss = self(input_ids, labels, attention_mask, teacher_logits)
-        log = dict(loss=total_loss, perplexity=torch.exp(total_loss))
+        log = dict(valid_loss=total_loss, valid_perplexity=torch.exp(total_loss))
         if exists(kd_loss):
-            log |= dict(class_loss=class_loss, kd_loss=kd_loss)
-        self.log_dict(log, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
+            log |= dict(valid_class_loss=class_loss, valid_kd_loss=kd_loss)
+        self.log_dict(log, prog_bar=True, on_step=True, on_epoch=True, sync_dist=True)
         return total_loss
 
     def configure_optimizers(self):
