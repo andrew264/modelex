@@ -11,7 +11,8 @@ from torchtune.training import OffloadActivations
 
 from models.config import ModelCfg, PeftCfg, TrainCfg
 from models.gguf_logits import GGUFModelLogits
-from models.layers.transformer_block import Transformer
+from models.layers.rotary_embedding import RotaryEmbedding
+from models.layers.transformer_block import Block
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
@@ -34,19 +35,23 @@ class LLMLit(L.LightningModule):
 
         self.tie_word_embeddings = cfg.tie_word_embeddings
 
-        self.model = Transformer(cfg=cfg, peft_cfg=peft_cfg, train_cfg=train_cfg)
+        self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
+        self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg, train_cfg) for idx in range(cfg.num_layers)])
+        self.norm = nn.RMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
+        self.rotary_emb = RotaryEmbedding(cfg)
+
         if not self.tie_word_embeddings:
-            if peft_cfg and 'lm_head' in peft_cfg.layers:
+            if peft_cfg and 'output' in peft_cfg.layers:
                 if peft_cfg.type == 'dora':
                     from torchtune.modules.peft import DoRALinear as Linear
                 else:
                     from torchtune.modules.peft import LoRALinear as Linear
                 Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
-                self.lm_head = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
+                self.output = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
             else:
-                self.lm_head = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
+                self.output = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
         else:
-            self.lm_head = TiedLinear2(self.model.embed_tokens)
+            self.output = TiedLinear2(self.tok_embeddings)
         # self.apply(self._init_weights)
 
         self._setup_loss_fn()
@@ -91,7 +96,8 @@ class LLMLit(L.LightningModule):
                 from torchtune.modules.loss import ForwardKLLoss
                 self.kld_loss = ForwardKLLoss(ignore_index=-100)
 
-    def _kd_loss_fn(self, input_ids: Tensor, logits: Optional[Union[Tensor, List[Tensor]]], teacher_logits: Optional[Tensor], labels: Tensor) -> Tensor:
+    def _kd_loss_fn(self, input_ids: Tensor, logits: Optional[Union[Tensor, List[Tensor]]], teacher_logits: Optional[Tensor],
+                    labels: Tensor) -> Tensor:
         assert exists(logits), "Student logits are required for Knowledge Distillation, Logits are not materialized for Fused CrossEntropy"
 
         if not exists(teacher_logits):
@@ -110,23 +116,27 @@ class LLMLit(L.LightningModule):
         del teacher_logits
         return loss
 
-    def forward(self, input_ids: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None,
-                teacher_logits: Optional[Tensor] = None, ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    def forward(self, input_ids: Tensor, labels: Tensor, attn_mask: Optional[Tensor] = None, teacher_logits: Optional[Tensor] = None, )\
+            -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
         labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[:labels.shape[0]])).contiguous()  # Shifting Labels
-
+        input_pos = torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0)
         with self.activations_handling_ctx:  # Forward Pass
-            x = self.model(x=input_ids, attn_mask=attn_mask)
+            x = self.tok_embeddings(input_ids)
+            freqs = self.rotary_emb(input_pos)
+            for layer in self.layers:
+                x = layer(x=x, freqs=freqs, attn_mask=attn_mask)
+            x = self.norm(x)
 
         if self.use_fused_ce:  # Fused CE
             x = x.contiguous().view(-1, self.cfg.hidden_size)
-            loss = self.loss(self.lm_head.weight, x, labels.view(-1))
+            loss = self.loss(self.output.weight, x, labels.view(-1))
             return loss, None, None
 
         if self.use_chunked_ce:  # Chunked CE
-            logits = [self.lm_head(chunk) for chunk in x]
+            logits = [self.output(chunk) for chunk in x]
             class_loss = self.loss(logits, labels)
         else:  # Normal CE
-            logits = self.lm_head(x)
+            logits = self.output(x)
             class_loss = self.loss(logits.contiguous().view(-1, self.cfg.vocab_size), labels.view(-1))
 
         kd_loss = None

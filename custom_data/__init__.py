@@ -6,6 +6,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import lightning as L
+from torchtune.generation import get_causal_mask_from_padding_mask
 
 CROSS_ENTROPY_IGNORE_IDX = -100
 BatchType = List[Dict[str, List[Union[int, List[float]]]]]
@@ -40,6 +41,15 @@ def get_padded_ids_and_labels(batch: BatchType, max_len: int) -> Tuple[Tensor, T
         labels.append(torch.tensor([CROSS_ENTROPY_IGNORE_IDX] * (max_len - len(label)) + label))
     return torch.stack(ids, dim=0), torch.stack(labels, dim=0)
 
+def get_causal_mask(input_ids: Tensor, pad_id: int, max_length) -> Tensor:
+    padding_masks = input_ids != pad_id
+    if not padding_masks.all():
+        # padding_masks = torch.nn.functional.pad(padding_masks, (0, max_length), value=True)
+        masks = get_causal_mask_from_padding_mask(padding_masks, target_seq_len=max_length)
+    else:
+        masks = torch.tril(torch.ones(max_length, max_length, dtype=torch.bool, device=input_ids.device)).unsqueeze(0)
+    return masks[:, None, :, :]
+
 class DataModule(L.LightningDataModule):
     def __init__(self, train_ds: Dataset, valid_ds: Optional[Dataset], batch_size: int, max_seq_length: int, max_pad: bool = False,
                  pad_to_multiple_of: int = 1, pad_id: int = 0):
@@ -62,19 +72,17 @@ class DataModule(L.LightningDataModule):
 
         teacher_logits = get_padded_logits(batch, max_len)
         input_ids, labels = get_padded_ids_and_labels(batch, max_len)
-        attention_mask = (input_ids != torch.tensor(pad_id, dtype=input_ids.dtype)).long()
+        causal_mask = get_causal_mask(input_ids, pad_id, max_len)
 
-        if len(batch) == 1 or attention_mask.sum().item() == attention_mask.numel(): attention_mask = None
-
-        return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask, "teacher_logits": teacher_logits}
+        return {"input_ids": input_ids, "labels": labels, "attention_mask": causal_mask, "teacher_logits": teacher_logits}
 
     @staticmethod
     def collate_max_pad_fn(max_len: int, pad_id: int, batch: BatchType) -> dict:
         teacher_logits = get_padded_logits(batch, max_len)
         input_ids, labels = get_padded_ids_and_labels(batch, max_len)
-        attention_mask = (input_ids != torch.tensor(pad_id, dtype=input_ids.dtype)).long()
+        causal_mask = get_causal_mask(input_ids, pad_id, max_len)
 
-        return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask, "teacher_logits": teacher_logits}
+        return {"input_ids": input_ids, "labels": labels, "attention_mask": causal_mask, "teacher_logits": teacher_logits}
 
     @staticmethod
     def collate_batch_pad_multiple(max_len: int, pad_id: int, multiple_of: int, batch: BatchType) -> dict:
@@ -82,10 +90,9 @@ class DataModule(L.LightningDataModule):
         max_len = ((max_len + multiple_of - 1) // multiple_of) * multiple_of
         teacher_logits = get_padded_logits(batch, max_len)
         input_ids, labels = get_padded_ids_and_labels(batch, max_len)
-        attention_mask = (input_ids != torch.tensor(pad_id, dtype=input_ids.dtype)).long()
+        causal_mask = get_causal_mask(input_ids, pad_id, max_len)
 
-        if len(batch) == 1 and attention_mask.sum().item() == attention_mask.numel(): attention_mask = None
-        return {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask, "teacher_logits": teacher_logits}
+        return {"input_ids": input_ids, "labels": labels, "attention_mask": causal_mask, "teacher_logits": teacher_logits}
 
     def train_dataloader(self):
         # damn these dataloader objects suck when num_workers > 0

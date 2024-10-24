@@ -1,9 +1,8 @@
 import os
 
+import llama_cpp
 import torch
 from torch import Tensor
-
-import llama_cpp
 
 class GGUFModelLogits:
     def __init__(self, name: str, n_ctx: int = 8192):

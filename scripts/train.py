@@ -2,6 +2,7 @@ import argparse
 import glob
 import importlib
 import os
+from pathlib import Path
 from typing import Optional
 
 import lightning as L
@@ -63,15 +64,16 @@ def main(path: str, train_ds: str, valid_ds: Optional[str], train_batches: Optio
     if p_cfg: setup_model_for_peft(model, p_cfg)
     if t_cfg.use_grad_checkpointing: set_activation_checkpointing(model, auto_wrap_policy={Block})
 
-    if os.path.exists(train_ds):
+    if Path(train_ds).is_file():
         train_ds = ParquetCustomDataReader(train_ds)
     else:
         train_ds = create_instance_from_string(train_ds)
 
-    if os.path.exists(valid_ds):
-        valid_ds = ParquetCustomDataReader(valid_ds)
-    elif valid_ds is not None:
-        valid_ds = create_instance_from_string(valid_ds)
+    if valid_ds is not None:
+        if Path(valid_ds).is_file():
+            valid_ds = ParquetCustomDataReader(valid_ds)
+        else:
+            valid_ds = create_instance_from_string(valid_ds)
     else:
         valid_ds = []
     datamod = DataModule(train_ds, valid_ds, batch_size=t_cfg.batch_size, max_seq_length=cfg.max_seq_len, max_pad=t_cfg.max_pad,
@@ -106,7 +108,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="train model")
     parser.add_argument("path", type=str, help="Path to the model (required)")
     parser.add_argument("train_data", type=str, help="Path to the parquet dataset (required)")
-    parser.add_argument("--validation", type=str, default="", help="Path to the parquet dataset (optional)")
+    parser.add_argument("--validation", type=str, default=None, help="Path to the parquet dataset (optional)")
     parser.add_argument("--train-batches", type=int, default=None, help="Num training batches per epoch (optional)")
     parser.add_argument("--validation-batches", type=int, default=None, help="Num validation batches per epoch (optional)")
     args = parser.parse_args()

@@ -1,75 +1,47 @@
-from typing import Optional, Any
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torchtune.modules import TiedLinear
-from transformers import GenerationMixin, Cache
-from transformers.modeling_outputs import CausalLMOutputWithPast
-from transformers.modeling_utils import ModuleUtilsMixin
 
 from models.config import ModelCfg
-from models.layers.transformer_block import Transformer
+from models.layers.rotary_embedding import RotaryEmbedding
+from models.layers.transformer_block import Block
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
-class LLM(nn.Module, ModuleUtilsMixin, GenerationMixin):
-    main_input_name = "inputs_embeds"
-    _supports_cache_class = True
-
+class LLM(nn.Module):
     def __init__(self, cfg: ModelCfg) -> None:
         super(LLM, self).__init__()
         self.cfg = cfg
-        self.config = dummy_config()
 
-        self.model = Transformer(cfg=cfg)
+        self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
+        self.layers = nn.ModuleList([Block(cfg, idx) for idx in range(cfg.num_layers)])
+        self.norm = nn.RMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
+        self.rotary_emb = RotaryEmbedding(cfg)
         if not self.cfg.tie_word_embeddings:
-            self.lm_head = nn.Linear(cfg.hidden_size, cfg.vocab_size, bias=False)
+            self.output = nn.Linear(cfg.hidden_size, cfg.vocab_size, bias=False)
         else:
-            self.lm_head = TiedLinear(self.model.embed_tokens)
+            self.output = TiedLinear(self.tok_embeddings)
+        self._cache_setup_complete = False
+    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None, ):
+        if self._cache_setup_complete: return
+        for layer in self.layers:
+            layer.setup_cache(batch_size=batch_size, dtype=dtype, max_seq_len=max_seq_len)
+        self._cache_setup_complete = True
+    def reset_cache(self):
+        for layer in self.layers: layer.reset_cache()
+    def caches_are_enabled(self): return self._cache_setup_complete
+    @property
+    def decoder_max_cache_seq_len(self): return self.cfg.max_seq_len
+    def forward(self, x: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, ) -> Tensor:
+        x = self.tok_embeddings(x)
+        if input_pos is None: input_pos = torch.arange(x.shape[1], device=x.device).unsqueeze(0)
+        freqs = self.rotary_emb(input_pos)
 
-    def forward(self, x: Tensor, pos_ids: Optional[Tensor] = None, cache_position: Optional[Tensor] = None, attn_mask: Optional[Tensor] = None,
-                past_kv: Optional[Cache] = None, **kwargs) -> CausalLMOutputWithPast:
-        logits = self.lm_head(self.model(x=x, pos_ids=pos_ids, cache_position=cache_position, attn_mask=attn_mask, past_kv=past_kv))
-        return CausalLMOutputWithPast(loss=None, logits=logits, past_key_values=past_kv, )
-
-    def prepare_inputs_for_generation(self, input_ids: Tensor, past_key_values: Optional[Cache] = None, attention_mask=None, cache_position=None,
-                                      use_cache=True, **kwargs, ):
-        past_length = 0
-        if exists(past_key_values):
-            past_length = cache_position[0] if cache_position is not None else past_key_values.get_seq_length()
-            max_cache_length = torch.tensor(past_key_values.get_max_length(), device=input_ids.device) if exists(
-                past_key_values.get_max_length()) else None
-
-            cache_length = past_length if max_cache_length is None else torch.min(max_cache_length, past_length)
-
-            if exists(attention_mask) and attention_mask.shape[1] > input_ids.shape[1]: input_ids = input_ids[:,
-                                                                                                    -(attention_mask.shape[1] - past_length):]
-            elif past_length < input_ids.shape[1]: input_ids = input_ids[:, past_length:]
-            if exists(max_cache_length) and exists(attention_mask) and cache_length + input_ids.shape[
-                1] > max_cache_length: attention_mask = attention_mask[:, -max_cache_length:]
-
-        position_ids = kwargs.get("position_ids", None)
-        if exists(attention_mask) and position_ids is None:
-            position_ids = attention_mask.long().cumsum(-1) - 1
-            position_ids.masked_fill_(attention_mask == 0, 1)
-            if past_key_values: position_ids = position_ids[:, -input_ids.shape[1]:]
-
-        model_inputs = {"x": input_ids.contiguous()}
-
-        input_length = position_ids.shape[-1] if exists(position_ids) else input_ids.shape[-1]
-        if cache_position is None: cache_position = torch.arange(past_length, past_length + input_length, device=input_ids.device)
-        elif use_cache: cache_position = cache_position[-input_length:]
-
-        model_inputs.update({"pos_ids": position_ids, "cache_position": cache_position, "past_kv": past_key_values, "attn_mask": attention_mask, })
-        return model_inputs
-
-    @classmethod
-    def can_generate(cls) -> bool: return True
-
-def dummy_config():  # HF compatibility
-    class Dummy:
-        is_encoder_decoder = False
-        use_cache = True
-
-    return Dummy()
+        for layer in self.layers:
+            x = layer(x=x, freqs=freqs, attn_mask=mask)
+        x = self.norm(x)
+        logits = self.output(x)
+        return logits

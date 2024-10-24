@@ -88,7 +88,6 @@ class TrainCfg(Cfg):
     def checks(self):
         assert 0 <= self.kll_loss_ratio <= 1., "kll_loss_ratio must be between 0 and 1"
         assert 0 <= self.warmup_ratio <= 1., "warmup_ratio must be between 0 and 1"
-        assert not(self.offload_activations and self.use_grad_checkpointing), "nuh uh; use either `offload_activations` or `use_grad_checkpointing`, not both at the same time"
         if self.accelerator == 'cpu':
             assert self.use_fused_ce is False, "can't do fused crossentropy in cpu"
             assert self.offload_activations is False, "can't offload activations when training with cpu"
@@ -108,16 +107,13 @@ class InferenceCfg(Cfg):
     precision: str = 'bf16'
     chat_format: str = 'llama3'
 
-    num_beams: int = 2
-    top_p: float = .95
     top_k: int = 12
     temperature: float = 1.
-    do_sample: bool = False
 
 class PeftCfg(Cfg):
     type: str = 'lora'
     rank: int = 8
     alpha: int = 16
     dropout: float = 0.05
-    layers: list[str] = ['qkv_proj', 'o_proj', 'mlp', 'lm_head']
+    layers: list[str] = ['qkv_proj', 'o_proj', 'mlp', 'output']
     quant_base: bool = False

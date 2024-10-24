@@ -21,13 +21,13 @@ class MLP(nn.Module):
                 from torchtune.modules.peft import LoRALinear as Linear
             Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
 
-            self.gate_proj = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)
-            self.up_proj = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)
-            self.down_proj = Linear(in_dim=intermediate, out_dim=hidden, use_bias=bias)
+            self.w1 = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)
+            self.w3 = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)
+            self.w2 = Linear(in_dim=intermediate, out_dim=hidden, use_bias=bias)
         else:
-            self.gate_proj = nn.Linear(hidden, intermediate, bias=bias)
-            self.up_proj = nn.Linear(hidden, intermediate, bias=bias)
-            self.down_proj = nn.Linear(intermediate, hidden, bias=bias)
+            self.w1 = nn.Linear(hidden, intermediate, bias=bias)
+            self.w3 = nn.Linear(hidden, intermediate, bias=bias)
+            self.w2 = nn.Linear(intermediate, hidden, bias=bias)
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.down_proj(self.act_fn(self.gate_proj(x), inplace=True) * self.up_proj(x))
+        return self.w2(self.act_fn(self.w1(x), inplace=True) * self.w3(x))

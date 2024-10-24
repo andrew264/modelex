@@ -29,6 +29,7 @@ class RotaryEmbedding(nn.Module):
 
     @torch.no_grad()
     def forward(self, position_ids: torch.LongTensor, dtype: torch.dtype = torch.bfloat16) -> Tuple[torch.Tensor, torch.Tensor]:
+        if position_ids.ndim == 1: position_ids = position_ids.unsqueeze(0)
         if "dynamic" in self.rope_type:
             self._dynamic_frequency_update(position_ids, device=position_ids.device)
 

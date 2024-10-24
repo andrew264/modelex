@@ -1,4 +1,3 @@
-import os
 import time
 from typing import Optional
 
@@ -19,7 +18,6 @@ def get_state_dict_from_safetensors(path: str | list[str], device: torch.device 
         print(f"Loaded weights from {path} in {time.time() - start:.3f}s.")
     else: print("No weights found.")
     return state_dict
-
 
 def save_as_safetensors(state_dict: dict, path: str) -> None:
     start = time.time()
