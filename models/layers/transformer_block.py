@@ -1,9 +1,8 @@
-from typing import Optional, Any
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.utils.checkpoint import checkpoint
 from transformers import Cache, StaticCache
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 
@@ -15,7 +14,7 @@ from models.layers.rotary_embedding import RotaryEmbedding
 def exists(x: Optional[Any]) -> bool: return x is not None
 
 def get_rmsnorm(cfg: Optional[TrainCfg] = None):
-    if exists(cfg) and cfg.accelerator == 'cpu': return nn.RMSNorm
+    if not exists(cfg) or cfg.accelerator == 'cpu': return nn.RMSNorm
     try:
         from liger_kernel.transformers.rms_norm import LigerRMSNorm as RMSNorm
         return RMSNorm
@@ -45,7 +44,7 @@ class Transformer(nn.Module):
         self.embed_tokens = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
         self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg, train_cfg) for idx in range(cfg.num_layers)])
         self.norm = get_rmsnorm(train_cfg)(cfg.hidden_size, eps=cfg.rms_norm_eps)
-        self.rotary_emb = RotaryEmbedding(dim=cfg.hidden_size // cfg.num_heads, base=cfg.rope_theta)
+        self.rotary_emb = RotaryEmbedding(cfg)
 
     def forward(self, x: Tensor, pos_ids: Optional[Tensor] = None, cache_position: Optional[Tensor] = None, attn_mask: Optional[Tensor] = None,
                 past_kv: Optional[Cache] = None) -> Tensor:

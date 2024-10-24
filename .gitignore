@@ -3,5 +3,6 @@
 /lightning_logs
 /.idea
 /.vscode
+/scripts/plots
 
 *.pyc

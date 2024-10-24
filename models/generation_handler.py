@@ -2,25 +2,24 @@ import gc
 import glob
 import os
 import time
-from typing import Any, Dict, Optional, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from tokenizers import Tokenizer
 from torch import Tensor
 from torchtune.modules.peft import get_merged_lora_ckpt
-from transformers import GenerationConfig, LogitsProcessorList, TopKLogitsWarper, TopPLogitsWarper, StoppingCriteriaList
-from transformers import LogitsWarper, StoppingCriteria, Cache
+from transformers import (Cache, GenerationConfig, LogitsProcessor, LogitsProcessorList, StoppingCriteria, StoppingCriteriaList, TopKLogitsWarper,
+                          TopPLogitsWarper)
 
-from models.config import ModelCfg, InferenceCfg, PeftCfg
+from models.config import InferenceCfg, ModelCfg, PeftCfg
 from models.inference_model import LLM
 from utils import get_state_dict_from_safetensors
 
-
 def exists(x: Optional[Any]) -> bool: return x is not None
 
-class TemperatureRangeLogitsWarper(LogitsWarper):
+class TemperatureRangeLogitsProcessor(LogitsProcessor):
     def __init__(self, start: float, end: float, num_steps: int):
-        super(TemperatureRangeLogitsWarper, self).__init__()
+        super(TemperatureRangeLogitsProcessor, self).__init__()
         if end < 0 or start < 0: raise ValueError("Temperature must be greater than 0.")
         self.start = start
         self.end = end
@@ -67,9 +66,6 @@ class StaticCache(Cache):
         self.key_cache: List[Tensor] = []
         self.value_cache: List[Tensor] = []
         cache_shape = (batch_size, cfg.num_kv_heads, cfg.max_seq_len, cfg.hidden_size // cfg.num_heads)
-        if self.device.type == "cuda":
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize(device=self.device)
         for _ in range(cfg.num_layers):
             # Note: `mark_static_address` is used to tag the cache as an fixed data pointer, preventing cuda graph
             # breaks when updating the cache.
@@ -162,11 +158,6 @@ class ModelGenerationHandler:
         self.model.generation_config = self.get_gen_config(None)
         if compiled: self._compile_model()
 
-        if self.device.type == 'cuda':
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize(device=self.device)
-
-
     def get_gen_config(self, max_new_tokens: Optional[int] = 512):
         cfg = self.infer_cfg
         return GenerationConfig(max_new_tokens=max_new_tokens, do_sample=cfg.do_sample, num_beams=cfg.num_beams, use_cache=True, pad_token_id=cfg.pad_token, bos_token_id=cfg.bos_token, eos_token_id=cfg.eos_tokens)
@@ -178,7 +169,7 @@ class ModelGenerationHandler:
     def set_processor(self):
         cfg = self.infer_cfg
         processors = []
-        if cfg.temperature > 0.: processors.append(TemperatureRangeLogitsWarper(cfg.temperature, cfg.temperature/2, 24))
+        if cfg.temperature > 0.: processors.append(TemperatureRangeLogitsProcessor(cfg.temperature, cfg.temperature/2, 24))
         if cfg.top_k > 0: processors.append(TopKLogitsWarper(top_k=cfg.top_k))
         if cfg.top_p < 1.: processors.append(TopPLogitsWarper(top_p=cfg.top_p))
         self.processor = LogitsProcessorList(processors)
@@ -186,20 +177,17 @@ class ModelGenerationHandler:
     def _compile_model(self):
         print('Compiling...')
         start = time.time()
-        self.model.forward = torch.compile(self.model.forward, fullgraph=True, mode="reduce-overhead")
+        self.model.forward = torch.compile(self.model.forward, fullgraph=True, mode="max-autotune")
 
         # Dry run for compilation
-        inp = "Love is a beautiful and"
-        for _ in range(2): self.generate(inp, max_new_tokens=10)  # Run twice cuz idl why; but this works? somehow?
+        for _ in range(2): self.generate(list(range(10)), max_new_tokens=10)  # Run twice cuz idl why; but this works? somehow?
 
         print(f'Compiled in {time.time() - start:.3f}s')
 
     def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False) -> Tuple[Union[str, List[int]], int, int, float]:
         self.cache.reset()
         gc.collect()
-        if self.device.type == 'cuda':
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        torch.cuda.empty_cache()
         if isinstance(prompt, str):
             assert exists(self.tokenizer), "Tokenizer not found"
             encoded = self.tokenizer.encode(prompt, add_special_tokens=False)
@@ -209,7 +197,7 @@ class ModelGenerationHandler:
         else:
             tokens = torch.tensor([prompt], device=self.device)
             encoded_len = len(prompt)
-            attention_mask = torch.tensor([[1]*len(prompt)], device=self.device)
+            attention_mask = torch.ones((1, encoded_len), device=self.device)
 
         start = time.time()
         out = self.model.generate(input_ids=tokens,

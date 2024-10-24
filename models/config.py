@@ -21,13 +21,18 @@ class Cfg:
 class ModelCfg(Cfg):
     hidden_size: int = 2048
     num_layers: int = 16
-    max_seq_len = 2048
+    max_seq_len = 4096
 
     # Misc
     rms_norm_eps: float = 1e-05
-    rope_theta: float = 500000.
     tie_word_embeddings: bool = False
     initializer_range: float = 0.02
+
+    # rope
+    rope_type: str = 'default'
+    rope_factor: float = 1.
+    rope_theta: float = 10000.
+    partial_rotary_factor: float = 1.
 
     # MLP
     intermediate_size: int = 8192
@@ -42,6 +47,13 @@ class ModelCfg(Cfg):
     # Tokenizer
     vocab_size: int = 32000
     pad_token: int = 0
+
+    @property
+    def head_dim(self): return self.hidden_size // self.num_heads
+    @property
+    def max_position_embeddings(self): return self.max_seq_len
+    @property
+    def num_attention_heads(self): return self.num_heads
 
 class TrainCfg(Cfg):
     num_epochs: int = 1

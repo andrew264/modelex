@@ -12,3 +12,6 @@ tokenizers
 pyarrow
 numpy
 llama-cpp-python
+seaborn
+matplotlib
+tabulate

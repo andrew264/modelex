@@ -8,7 +8,7 @@ from torch import Tensor
 from models.config import ModelCfg, PeftCfg, TrainCfg
 
 class MLP(nn.Module):
-    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg], train_cfg: Optional[TrainCfg] = None) -> None:
+    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None, train_cfg: Optional[TrainCfg] = None) -> None:
         super(MLP, self).__init__()
         self.act_fn = F.silu
         hidden = cfg.hidden_size

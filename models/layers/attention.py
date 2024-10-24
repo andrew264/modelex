@@ -19,7 +19,7 @@ def get_pos_emb_fn(cfg: Optional[TrainCfg] = None):
         q_embed = (q * cos) + (rotate_half(q) * sin)
         k_embed = (k * cos) + (rotate_half(k) * sin)
         return q_embed, k_embed
-    if exists(cfg) and cfg.accelerator == 'cpu': return apply_rotary_pos_emb
+    if not exists(cfg) or cfg.accelerator == 'cpu': return apply_rotary_pos_emb
     try:
         from liger_kernel.transformers.rope import liger_rotary_pos_emb
         return liger_rotary_pos_emb
@@ -34,7 +34,7 @@ class Attention(nn.Module):
         self.hidden_size = cfg.hidden_size
         self.num_heads = cfg.num_heads
         self.num_kv_heads = cfg.num_kv_heads
-        self.head_dim = cfg.hidden_size // cfg.num_heads
+        self.head_dim = cfg.head_dim
         self.kv_hidden_size = cfg.num_kv_heads * self.head_dim
         self.num_kv_groups = cfg.num_heads // cfg.num_kv_heads
         qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
@@ -74,7 +74,7 @@ class Attention(nn.Module):
             v_bias = state_dict.pop(prefix + 'v_proj.bias')
             state_dict[prefix + 'qkv_proj.bias'] = torch.cat([q_bias, k_bias, v_bias])
 
-    def forward(self, x: Tensor, freqs: Tensor, past_kv: Optional[Cache] = None, attn_mask: Optional[Tensor] = None,
+    def forward(self, x: Tensor, freqs: Tuple[Tensor, Tensor], past_kv: Optional[Cache] = None, attn_mask: Optional[Tensor] = None,
                 cache_position: Optional[Tensor] = None, ) -> Tensor:
         bsz, seqlen, _ = x.size()
         is_causal = attn_mask is None and seqlen > 1
@@ -93,6 +93,5 @@ class Attention(nn.Module):
             v = v.repeat_interleave(self.num_kv_groups, dim=1)
 
         if exists(attn_mask): attn_mask = attn_mask[..., :k.shape[-2]]
-        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal).transpose(1, 2).view(bsz, seqlen,
-                                                                                                                                    self.hidden_size)
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal).transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_size)
         return self.o_proj(attn)
