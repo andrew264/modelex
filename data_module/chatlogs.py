@@ -7,7 +7,7 @@ from typing import Dict, List, Type, TypedDict
 import numpy as np
 from tokenizers import Tokenizer
 
-from custom_data.prompt_format import ChatFormatType, ChatFormat, Llama3Format, Gemma2Format, CustomFormat
+from data_module.prompt_format import ChatFormatType, ChatFormat, Llama3Format, Gemma2Format, CustomFormat
 
 class Message(TypedDict):
     user: str

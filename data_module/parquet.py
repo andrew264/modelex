@@ -1,9 +1,20 @@
 import glob
-from typing import Dict, Optional, Union
+from typing import Dict, Iterator, List, Optional, Union
 
 import numpy as np
 import pyarrow.parquet as pq
 from tokenizers import Tokenizer
+from torch.utils.data import Dataset
+
+class ParquetCustomDataReader(Dataset):
+    def __init__(self, path: str) -> None:
+        self.pq_file = pq.ParquetFile(path)
+    def __len__(self) -> int:
+        return self.pq_file.num_row_groups
+    def __getitem__(self, idx) -> Dict[str, List[int]]:
+        return self.pq_file.read_row_group(idx).to_pydict()
+    def __iter__(self) -> Iterator[Dict[str, List[int]]]:
+        for i in range(len(self)): yield self[i]
 
 class ParquetTextDataset:
     def __init__(self, path: str, tokenizer_path: Optional[str]=None) -> None:

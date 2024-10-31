@@ -1,10 +1,13 @@
+import argparse
 import datetime
 import os
-import torch
-import argparse
 
+import torch
+
+from data_module.prompt_format import Prompt
 from models.generation_handler import ModelGenerationHandler
-from custom_data.prompt_format import Prompt
+
+torch.set_float32_matmul_precision('high')
 
 def multiline_input(name: str = 'User'):
     lines = []
@@ -28,7 +31,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     device = torch.device(args.device)
-    model_handler = ModelGenerationHandler(args.path, device=device,)
+    model_handler = ModelGenerationHandler(args.path, device=device, )
     model_handler.load_model()
 
     dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
@@ -48,4 +51,3 @@ if __name__ == '__main__':
 
         print(f"{args.botname}: {decoded}")
         print(f"Generated {num_tokens} tokens in {generation_time:.3f}s ({num_tokens / generation_time:.3f} tokens/s)")
-

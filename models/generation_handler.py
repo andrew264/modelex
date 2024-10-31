@@ -10,7 +10,7 @@ from torchtune.generation import generate
 from torchtune.modules.peft import get_merged_lora_ckpt
 
 from models.config import InferenceCfg, ModelCfg, PeftCfg
-from models.inference_model import LLM
+from models.llm import LLM
 from utils import get_state_dict_from_safetensors
 
 def exists(x: Optional[Any]) -> bool: return x is not None
@@ -66,15 +66,15 @@ class ModelGenerationHandler:
     def _compile_model(self):
         print('Compiling...')
         start = time.time()
-        self.model.forward = torch.compile(self.model.forward, fullgraph=True, mode="max-autotune")
+        self.model.forward = torch.compile(self.model.forward, fullgraph=True, )
 
         # Dry run for compilation
         for _ in range(2): self.generate(list(range(10)), max_new_tokens=10)  # Run twice cuz idl why; but this works? somehow?
 
         print(f'Compiled in {time.time() - start:.3f}s')
 
-    def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False) -> Tuple[
-        Union[str, List[int]], int, int, float]:
+    def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512,
+                 return_tokens: bool = False) -> Tuple[Union[str, List[int]], int, int, float]:
         self.model.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
@@ -88,8 +88,9 @@ class ModelGenerationHandler:
             encoded_len = len(prompt)
 
         start = time.time()
+        top_k = self.infer_cfg.top_k if 1 <= self.infer_cfg.top_k <= self.cfg.vocab_size else None
         out, _ = generate(self.model, tokens, max_generated_tokens=max_new_tokens, pad_id=self.cfg.pad_token, temperature=self.infer_cfg.temperature,
-                          top_k=self.infer_cfg.top_k, stop_tokens=self.infer_cfg.eos_tokens)
+                          top_k=top_k, stop_tokens=self.infer_cfg.eos_tokens)
         out = out[0].tolist()
         total_tokens = len(out)
         out_tokens = out[encoded_len:]

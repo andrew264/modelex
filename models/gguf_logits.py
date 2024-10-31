@@ -5,8 +5,11 @@ import torch
 from torch import Tensor
 
 class GGUFModelLogits:
-    def __init__(self, name: str, n_ctx: int = 8192):
-        kwargs = dict(logits_all=True, n_ctx=n_ctx, offload_kqv=False, n_threads=os.cpu_count() - 1, verbose=False)
+    def __init__(self, name: str, n_ctx: int = 8192, device: str = 'cpu'):
+        n_gpu_layers = 0
+        if device.startswith('cuda') or device == 'gpu':
+            n_gpu_layers = -1
+        kwargs = dict(n_gpu_layers=n_gpu_layers, logits_all=True, n_ctx=n_ctx, offload_kqv=False, n_threads=os.cpu_count() - 1, verbose=False)
         if name.endswith('.gguf'):
             self.model = llama_cpp.Llama(model_path=name, **kwargs)
         else:

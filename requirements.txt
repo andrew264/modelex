@@ -3,9 +3,6 @@ transformers
 safetensors
 litserve
 liger-kernel
-lightning
-bitsandbytes
-deepspeed
 torchtune
 datasets
 tokenizers
@@ -15,3 +12,7 @@ llama-cpp-python
 seaborn
 matplotlib
 tabulate
+torchao
+tqdm
+yaml
+pydantic

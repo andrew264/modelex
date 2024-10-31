@@ -55,50 +55,6 @@ class ModelCfg(Cfg):
     @property
     def num_attention_heads(self): return self.num_heads
 
-class TrainCfg(Cfg):
-    num_epochs: int = 1
-    batch_size: int = 1
-    num_accum_steps: int = 1
-    precision: str = "bf16"
-    accelerator: str = "gpu"
-
-    offload_activations: bool = False
-    use_grad_checkpointing: bool = False
-
-    max_pad: bool = False
-    pad_multiplier: int = 1
-
-    use_fused_ce: bool = False
-    use_chunked_ce: bool = False
-    num_output_chunks: int = 1
-
-    learning_rate: float = 5e-5
-    use_scheduler: bool = True
-    warmup_ratio: float = .1
-
-    use_stage3: bool = False
-
-    use_kd: bool = False
-    teacher_model: str = ""
-    kll_loss_ratio: float = .5
-
-    @property
-    def is_online_kd(self) -> bool: return self.teacher_model and self.use_kd
-
-    def checks(self):
-        assert 0 <= self.kll_loss_ratio <= 1., "kll_loss_ratio must be between 0 and 1"
-        assert 0 <= self.warmup_ratio <= 1., "warmup_ratio must be between 0 and 1"
-        if self.accelerator == 'cpu':
-            assert self.use_fused_ce is False, "can't do fused crossentropy in cpu"
-            assert self.offload_activations is False, "can't offload activations when training with cpu"
-            assert self.use_stage3 is False, "no stage3 for cpu training"
-        if self.use_fused_ce:
-            assert self.use_kd is False, "can't compute logits when using fused crossentropy, which is required for knowledge distillation"
-            assert self.use_chunked_ce is False, "nuh uh; use either `use_fused_ce` or `use_chunked_ce`, not both at the same time"
-        if self.use_chunked_ce:
-            assert self.num_output_chunks > 1, "if you gonna use chunking you must also set the number of chunks"
-            assert self.max_pad or self.pad_multiplier > 1, "uhm, make sure you pad sequence length properly before we chunk them into equal length"
-
 class InferenceCfg(Cfg):
     bos_token: int = 128000
     eos_tokens: list[int] = [128001, 128008, 128009]

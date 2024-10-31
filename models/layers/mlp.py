@@ -5,10 +5,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from models.config import ModelCfg, PeftCfg, TrainCfg
+from models.config import ModelCfg, PeftCfg
 
 class MLP(nn.Module):
-    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None, train_cfg: Optional[TrainCfg] = None) -> None:
+    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None) -> None:
         super(MLP, self).__init__()
         self.act_fn = F.silu
         hidden = cfg.hidden_size

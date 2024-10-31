@@ -7,27 +7,22 @@ import torch.nn.functional as F
 from torch import Tensor
 from torchtune.modules import KVCache
 
-from models.config import ModelCfg, PeftCfg, TrainCfg
+from models.config import ModelCfg, PeftCfg
 
 def exists(x: Optional[Any]) -> bool: return x is not None
 
-def get_pos_emb_fn(cfg: Optional[TrainCfg] = None):
-    def rotate_half(x: Tensor) -> Tensor: return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
-    def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsqueeze_dim: int = 1) -> Tuple[Tensor, Tensor]:
-        cos = cos.unsqueeze(unsqueeze_dim)
-        sin = sin.unsqueeze(unsqueeze_dim)
-        q_embed = (q * cos) + (rotate_half(q) * sin)
-        k_embed = (k * cos) + (rotate_half(k) * sin)
-        return q_embed, k_embed
-    if not exists(cfg) or cfg.accelerator == 'cpu': return apply_rotary_pos_emb
-    try:
-        from liger_kernel.transformers.rope import liger_rotary_pos_emb
-        return liger_rotary_pos_emb
-    except ImportError:
-        return apply_rotary_pos_emb
+def rotate_half(x: Tensor) -> Tensor:
+    return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
+
+def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsqueeze_dim: int = 1) -> Tuple[Tensor, Tensor]:
+    cos = cos.unsqueeze(unsqueeze_dim)
+    sin = sin.unsqueeze(unsqueeze_dim)
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
 
 class Attention(nn.Module):
-    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None, train_cfg: Optional[TrainCfg] = None):
+    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None):
         super(Attention, self).__init__()
         self.cfg = cfg
         self.layer_idx = layer_idx
@@ -38,7 +33,6 @@ class Attention(nn.Module):
         self.kv_hidden_size = cfg.num_kv_heads * self.head_dim
         self.num_kv_groups = cfg.num_heads // cfg.num_kv_heads
         qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
-        self.apply_rotary_pos_emb = get_pos_emb_fn(train_cfg)
 
         hidden = cfg.hidden_size
         if peft_cfg:
@@ -96,7 +90,7 @@ class Attention(nn.Module):
         k = k.view(bsz, seqlen, self.num_kv_heads, self.head_dim)
         v = v.view(bsz, seqlen, self.num_kv_heads, self.head_dim)
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
-        q, k = self.apply_rotary_pos_emb(q, k, *freqs)
+        q, k = apply_rotary_pos_emb(q, k, *freqs)
 
         if self.cache_enabled: k, v = self.kv_cache.update(k, v)
 

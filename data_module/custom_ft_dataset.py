@@ -2,8 +2,8 @@ from typing import List, Dict
 
 import numpy as np
 
-from custom_data.chatlogs import Conversations
-from custom_data.parquet import ParquetTextDataset
+from data_module.chatlogs import Conversations
+from data_module.parquet import ParquetTextDataset
 
 
 class CustomFTDataset:

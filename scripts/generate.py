@@ -1,5 +1,6 @@
-import torch
 import argparse
+
+import torch
 
 from models.generation_handler import ModelGenerationHandler
 
@@ -10,7 +11,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     device = torch.device(args.device)
-    model_handler = ModelGenerationHandler(args.path, device=device,)
+    model_handler = ModelGenerationHandler(args.path, device=device, )
     model_handler.load_model()
 
     while True:
