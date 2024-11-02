@@ -46,6 +46,7 @@ class LLM(nn.Module):
         self._cache_setup_complete = False
         self.num_output_chunks = 1
         self.offload_context = contextlib.nullcontext()
+        self._embedding_device = None
     def _init_weights(self, module):
         std = self.cfg.initializer_range
         if isinstance(module, nn.Linear):
@@ -71,8 +72,18 @@ class LLM(nn.Module):
         self.num_output_chunks = chunks
     def set_offload_context(self, ctx):
         self.offload_context = ctx
+    def offload_embeddings(self, offload: bool = True):
+        if offload:
+            self._embedding_device = torch.device('cpu')
+        else:
+            self._embedding_device = self.output.weight.device
+        print(f'Offloading tok_embeddings to {self._embedding_device.type} | Layer size: {(self.tok_embeddings.weight.nbytes / (1024**2)):.3f} MiB')
+        self.tok_embeddings = self.tok_embeddings.to(device=self._embedding_device)
     def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, ) -> Union[Tensor, list[Tensor]]:
-        x = self.tok_embeddings(input_ids)
+        device = input_ids.device
+        if input_ids.device != self._embedding_device:
+            input_ids = input_ids.to(device=self._embedding_device)
+        x = self.tok_embeddings(input_ids).to(device=device)
         if input_pos is None: input_pos = torch.arange(x.shape[1], device=x.device).unsqueeze(0)
         freqs = self.rotary_emb(input_pos)
         with self.offload_context:

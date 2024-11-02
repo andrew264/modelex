@@ -1,3 +1,4 @@
+import enum
 import importlib
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +15,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchtune.modules import get_cosine_schedule_with_warmup
-from torchtune.training import get_memory_stats, OffloadActivations, set_activation_checkpointing
+from torchtune.training import cleanup_before_training, get_memory_stats, OffloadActivations, set_activation_checkpointing
 from torchtune.utils import batch_to_device
 from tqdm import tqdm
 
@@ -63,8 +64,8 @@ class TrainingConfig(BaseModel):
     epochs: int = Field(..., gt=0)
     batch_size: int = Field(..., gt=0)
     gradient_accumulation_steps: int = Field(1, gt=0)
-    max_steps_per_epoch: Optional[int] = Field(None, gt=0)
     offload_activations: bool = False
+    offload_embeddings: bool = False
     device: str = Field('cuda', description='training device')
     checkpointing_layers: List[str] = Field(default_factory=list, description='List of layer names to apply gradient checkpointing')
     grad_clip: GradClipConfig = Field(default_factory=GradClipConfig)
@@ -80,6 +81,7 @@ class LoggingConfig(BaseModel):
 
 class DatasetConfig(BaseModel, Instanceable):
     class_path: str = Field(...)
+    max_steps: Optional[int] = Field(None, gt=0)
     params: Dict = Field(default_factory=dict)
 
 class CollateFnConfig(BaseModel, Instanceable):
@@ -107,6 +109,10 @@ class TrainerConfig(BaseModel):
         with open(path, encoding='utf-8') as f:
             return cls(**yaml.safe_load(f))
 
+class LogPrefix(enum.StrEnum):
+    TRAIN = 'train/'
+    VALIDATION = 'valid/'
+
 class Trainer:  # to new beginnings ig
     def __init__(self, model: LLM, config: Union[TrainerConfig, str]):
         if isinstance(config, str):
@@ -123,7 +129,7 @@ class Trainer:  # to new beginnings ig
         self.train_dataloader = None
         self.valid_dataloader = None
         self.device = None
-        self.global_step = 0
+        self.global_steps: Dict[LogPrefix, int] = {p:0 for p in LogPrefix}
         self.items_per_epochs = 0
         self.teacher_model = None
 
@@ -208,7 +214,7 @@ class Trainer:  # to new beginnings ig
 
         if exists(data.valid_dataset):
             valid_ds_class = data.valid_dataset.get_instance()
-            valid_dataset = valid_ds_class(**data.train_dataset.params)
+            valid_dataset = valid_ds_class(**data.valid_dataset.params)
             self.valid_dataloader = DataLoader(valid_dataset, **dataloader_cfg)
 
     def _setup_logger(self):
@@ -228,15 +234,18 @@ class Trainer:  # to new beginnings ig
             checkpointing_layers = {get_instance(l) for l in self.config.training.checkpointing_layers}
             set_activation_checkpointing(self.model, auto_wrap_policy=checkpointing_layers)
 
+        ### Offload Embeddings
+        self.model.offload_embeddings(self.config.training.offload_embeddings)
+
         kd_config = self.config.training.kd
         if exists(kd_config):
             self.teacher_device = torch.device(kd_config.teacher_device)
             self.teacher_model = GGUFModelLogits(kd_config.gguf_path, n_ctx=self.model.cfg.max_seq_len, device=kd_config.teacher_device)
 
-    def log(self, prefix: str = "train/", **kwargs: Union[float, torch.Tensor, Dict[str, float]]):
+    def log(self, prefix: LogPrefix, **kwargs: Union[float, torch.Tensor, Dict[str, float]]):
         if not exists(self.config.logging):
             return
-        step = self.global_step
+        step = self.global_steps[prefix]
         for name, value in kwargs.items():
             if isinstance(value, (float, int)):
                 self.writer.add_scalar(f"{prefix}{name}", value, global_step=step)
@@ -258,7 +267,7 @@ class Trainer:  # to new beginnings ig
     def steps_per_epoch(self):
         return self.items_per_epochs // (self.config.training.batch_size * self.config.training.gradient_accumulation_steps)
 
-    def _calc_ce_loss(self, logits: Union[List[Tensor], Tensor], labels: Tensor) -> Tensor:
+    def _calc_ce_loss(self, logits: Union[List[Tensor], Tensor], labels: Tensor, prefix: LogPrefix) -> Tensor:
         if self.config.training.loss.cpu_offload:
             device = torch.device('cpu')
             labels = labels.to(device=device)
@@ -271,7 +280,7 @@ class Trainer:  # to new beginnings ig
             loss = self.loss_fn(logits, labels)
         else:
             loss = self.loss_fn(logits.contiguous().view(-1, self.model.cfg.vocab_size), labels.view(-1))
-        self.log(crossentropy_loss=loss.item())
+        self.log(crossentropy_loss=loss.item(), prefix=prefix)
         return loss
 
     def _get_teacher_logits(self, input_ids: Tensor) -> Optional[Union[List[Tensor], Tensor]]:
@@ -281,17 +290,17 @@ class Trainer:  # to new beginnings ig
             teacher_logits = [chunk for chunk in teacher_logits.chunk(self.config.training.loss.num_output_chunks, dim=1)]
         return teacher_logits
 
-    def _calc_kl_loss(self, teacher_logits: Tensor, logits: Union[List[Tensor], Tensor], labels: Tensor) -> Tensor:
+    def _calc_kl_loss(self, teacher_logits: Tensor, logits: Union[List[Tensor], Tensor], labels: Tensor, prefix: LogPrefix) -> Tensor:
         if isinstance(logits, list):
             logits = [chunk.to(device=self.teacher_device) for chunk in logits]
         else:
             logits = logits.to(device=self.teacher_device)
         labels = labels.to(device=self.teacher_device)
         kd_loss = self.kd_loss_fn(logits, teacher_logits, labels)
-        self.log(distillation_loss=kd_loss.item())
+        self.log(distillation_loss=kd_loss.item(), prefix=prefix)
         return kd_loss.to(self.device)
 
-    def _loss_step(self, batch: dict) -> Tensor:
+    def _loss_step(self, batch: dict, prefix: LogPrefix = LogPrefix.TRAIN) -> Tensor:
         batch_to_device(batch, self.device)
         input_ids = batch.get("input_ids")
         input_pos = batch.get("input_pos")
@@ -307,11 +316,11 @@ class Trainer:  # to new beginnings ig
             logits = future_logits.result()
 
         if not exists(self.teacher_model):
-            loss = self._calc_ce_loss(logits, labels)
+            loss = self._calc_ce_loss(logits, labels, prefix)
             return loss
 
-        ce_loss = self._calc_ce_loss(logits, labels)
-        kd_loss = self._calc_kl_loss(teacher_logits, logits, labels)
+        ce_loss = self._calc_ce_loss(logits, labels, prefix)
+        kd_loss = self._calc_kl_loss(teacher_logits, logits, labels, prefix)
         kll_loss_ratio = self.config.training.kd.kll_loss_ratio
         loss = (1 - kll_loss_ratio) * ce_loss + kll_loss_ratio * kd_loss
         return loss
@@ -332,14 +341,19 @@ class Trainer:  # to new beginnings ig
         t0 = time.perf_counter()
         running_loss: Tensor = torch.tensor(0., device=self.device)
         num_tokens = 0
+        if exists(self.config.data.train_dataset.max_steps):
+            max_steps_per_epoch = self.config.data.train_dataset.max_steps
+        else:
+            max_steps_per_epoch = self.items_per_epochs
+        log_prefix = LogPrefix.TRAIN
         for epoch_num in range(train_config.epochs):
             progress_bar = tqdm(total=self.steps_per_epoch)
             for idx, batch in enumerate(self.train_dataloader):
-                if exists(train_config.max_steps_per_epoch) and (idx // train_config.gradient_accumulation_steps) == train_config.max_steps_per_epoch:
+                if exists(max_steps_per_epoch) and (idx // train_config.gradient_accumulation_steps) == max_steps_per_epoch:
                     break
                 current_num_tokens = (batch.get("labels") != self.loss_fn.ignore_index).sum()
                 num_tokens += current_num_tokens
-                running_loss += self._loss_step(batch) * current_num_tokens
+                running_loss += self._loss_step(batch, prefix=log_prefix) * current_num_tokens
                 if (idx + 1) % train_config.gradient_accumulation_steps == 0:
                     loss = running_loss / num_tokens
                     loss.backward()
@@ -349,14 +363,13 @@ class Trainer:  # to new beginnings ig
                     self.optimizer.step()
                     self.optimizer.zero_grad(set_to_none=True)
                     self._scheduler_step()
-                    self.global_step += 1
                     _loss = loss.item()
                     _perplexity = torch.exp(loss).item()
                     progress_bar.update(1)
                     progress_bar.set_description(
-                        f'Epoch: {epoch_num} | Batch idx: {idx}/{self.items_per_epochs} | Loss: {loss:.3f} | Perplexity: {_perplexity:.3f}')
+                        f'Epoch: {epoch_num} | Batch idx: {idx}/{max_steps_per_epoch} | Loss: {_loss:.3f} | Perplexity: {_perplexity:.3f}')
 
-                    if exists(self.config.logging) and self.global_step % self.config.logging.log_frequency == 0:
+                    if exists(self.config.logging) and self.global_steps[log_prefix] % self.config.logging.log_frequency == 0:
                         time_per_step = time.perf_counter() - t0
                         log_dict = dict(loss=_loss, perplexity=_perplexity, lr=self.optimizer.param_groups[0]['lr'],
                                         tokens_per_sec=num_tokens / time_per_step)
@@ -364,12 +377,47 @@ class Trainer:  # to new beginnings ig
                             log_dict.update(get_memory_stats(device=self.device))
                         if train_config.grad_clip.enabled and exists(grad_norm):
                             log_dict.update({'grad_norm': grad_norm})
-                        self.log(**log_dict)
+                        self.log(prefix=log_prefix, **log_dict)
 
+                    self.global_steps[log_prefix] += 1
                     running_loss = torch.tensor(0., device=self.device)
                     num_tokens = 0
                     t0 = time.perf_counter()
+            self.optimizer.zero_grad(set_to_none=True)
+            self._validation_pass()
         print('Training Complete')
+
+    def _validation_pass(self):
+        if not exists(self.valid_dataloader): return
+        t0 = time.perf_counter()
+        progress_bar = tqdm(total=len(self.valid_dataloader))
+        if exists(self.config.data.valid_dataset.max_steps):
+            max_steps = self.config.data.valid_dataset.max_steps
+        else:
+            max_steps = len(self.valid_dataloader)
+        log_prefix = LogPrefix.VALIDATION
+        self.model.eval()
+        for idx, batch in enumerate(self.valid_dataloader):
+            torch.cuda.empty_cache()  # something is really broken; i need this here to not OOM
+            if idx == max_steps:
+                break
+            current_num_tokens = (batch.get("labels") != self.loss_fn.ignore_index).sum()
+            with torch.no_grad():
+                loss = self._loss_step(batch, prefix=log_prefix)
+            _loss = loss.item()
+            _perplexity = torch.exp(loss).item()
+            progress_bar.update(1)
+            progress_bar.set_description(f'Batch idx: {idx}/{max_steps} | Loss: {_loss:.3f} | Perplexity: {_perplexity:.3f}')
+
+            if exists(self.config.logging) and self.global_steps[log_prefix] % self.config.logging.log_frequency == 0:
+                time_per_step = time.perf_counter() - t0
+                log_dict = dict(loss=_loss, perplexity=_perplexity, tokens_per_sec=current_num_tokens / time_per_step, prefix=LogPrefix.VALIDATION)
+                if self.device.type == 'cuda':
+                    log_dict.update(get_memory_stats(device=self.device))
+                self.log(**log_dict)
+            self.global_steps[log_prefix] += 1
+            t0 = time.perf_counter()
+        self.model.train()
 
     def close(self):
         print('Closing Trainer...')
