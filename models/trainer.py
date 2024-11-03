@@ -398,7 +398,6 @@ class Trainer:  # to new beginnings ig
         log_prefix = LogPrefix.VALIDATION
         self.model.eval()
         for idx, batch in enumerate(self.valid_dataloader):
-            torch.cuda.empty_cache()  # something is really broken; i need this here to not OOM
             if idx == max_steps:
                 break
             current_num_tokens = (batch.get("labels") != self.loss_fn.ignore_index).sum()
@@ -417,6 +416,7 @@ class Trainer:  # to new beginnings ig
                 self.log(**log_dict)
             self.global_steps[log_prefix] += 1
             t0 = time.perf_counter()
+            torch.cuda.empty_cache()  # something is really broken; i need this here to not OOM
         self.model.train()
 
     def close(self):

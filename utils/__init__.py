@@ -22,3 +22,5 @@ def save_as_safetensors(state_dict: dict, path: str) -> None:
     start = time.time()
     safe_save_file(state_dict, path)
     print(f"Saved state_dict to {path} in {time.time() - start:.3f}s.")
+
+def str2bool(v: str) -> bool: return v.lower() in ("yes", "true", "t", "1")

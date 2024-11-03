@@ -2,20 +2,22 @@ import datetime
 import glob
 import json
 import os
-from typing import Dict, List, Type, TypedDict
+from typing import Dict, List, Optional, Type, TypedDict, Union
 
 import numpy as np
 from tokenizers import Tokenizer
 
 from data_module.prompt_format import ChatFormatType, ChatFormat, Llama3Format, Gemma2Format, CustomFormat
+from utils import str2bool
 
 class Message(TypedDict):
     user: str
     message: str
+    thoughts: Optional[str]
 
 class Conversations(ChatFormat):
     CROSS_ENTROPY_IGNORE_IDX = -100
-    def __init__(self, path: str, tokenizer_path: str, chat_format: str = "llama3") -> None:
+    def __init__(self, path: str, tokenizer_path: str, chat_format: str = "llama3", enable_thoughts: Union[bool, str] = True) -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path)
         self._files = glob.glob(f'{path}/**/*.json', recursive=True)
         self._sysprompt = ''
@@ -24,6 +26,10 @@ class Conversations(ChatFormat):
         self._assistant_name = 'assistant'
         with open(os.path.join(path, 'name'), 'r', encoding='utf-8') as f: self._assistant_name = f.read()
         self.select_format(chat_format=chat_format)
+        if isinstance(enable_thoughts, str):
+            self.enable_thoughts = str2bool(enable_thoughts)
+        else:
+            self.enable_thoughts = enable_thoughts
     def select_format(self, chat_format: str):
         match chat_format:
             case ChatFormatType.LLAMA3.value: self._apply_format(Llama3Format)
@@ -39,7 +45,10 @@ class Conversations(ChatFormat):
         labels.extend([self.CROSS_ENTROPY_IGNORE_IDX] * len(sp.ids))
         for msg in data:
             u = self._tokenizer.encode(f'{self.SH}{msg["user"]}{self.EH}', add_special_tokens=False)
-            m = self._tokenizer.encode(f'{msg["message"]}{self.EOT}', add_special_tokens=False)
+            t: str = msg.get('thoughts', '')
+            if t and self.enable_thoughts:
+                t = f'<think>{t.strip()}</think>\n'
+            m = self._tokenizer.encode(f'{t}{msg["message"]}{self.EOT}', add_special_tokens=False)
             combined = u.ids+m.ids
             ids.extend(combined)
             if msg['user'] == self._assistant_name: labels.extend(([self.CROSS_ENTROPY_IGNORE_IDX] * len(u.ids)) + m.ids)

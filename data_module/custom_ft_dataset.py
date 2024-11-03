@@ -7,10 +7,10 @@ from data_module.parquet import ParquetTextDataset
 
 
 class CustomFTDataset:
-    def __init__(self, conv_path: str, parquet_path: str, tokenizer_path: str, chat_format: str, num_epochs: int|str=1, mix_ratio: int|str = 1) -> None:
+    def __init__(self, conv_path: str, parquet_path: str, tokenizer_path: str, chat_format: str, enable_thoughts: str, num_epochs: int|str=1, mix_ratio: int|str = 1) -> None:
         if isinstance(num_epochs, str): num_epochs = int(num_epochs)
         if isinstance(mix_ratio, str): mix_ratio = int(mix_ratio)
-        self.conversations = Conversations(conv_path, tokenizer_path, chat_format)
+        self.conversations = Conversations(conv_path, tokenizer_path, chat_format, enable_thoughts)
         self.parquet_ds = ParquetTextDataset(parquet_path, tokenizer_path)
         self.epochs = num_epochs
         self.mix_ratio = mix_ratio
