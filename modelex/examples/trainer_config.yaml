@@ -1,0 +1,54 @@
+data:
+  collate_fn:
+    class_path: data_module.collate_fn.CollateBatchPad
+    params:
+      max_len: 4096
+      pad_id: 0
+  num_workers: 4
+  pin_memory: true
+  train_dataset:
+    class_path: modelex.datasets.ParquetCustomDataReader
+    max_steps: null
+    params:
+      path: /path/to/ft_train.parquet
+  valid_dataset:
+    class_path: modelex.datasets.ParquetCustomDataReader
+    max_steps: null
+    params:
+      path: /path/to/ft_valid.parquet
+logging:
+  log_frequency: 1
+  save_frequency: 1
+  tensorboard_dir: /path/to/log
+training:
+  batch_size: 1
+  checkpointing_layers:
+  - modelex.modules.Block
+  device: cuda
+  epochs: 4
+  grad_clip:
+    enabled: true
+    max_norm: 1.0
+  gradient_accumulation_steps: 4
+  kd:
+    gguf_path: /path/to/model.gguf
+    kll_loss_ratio: 0.3
+    teacher_device: cpu
+  loss:
+    cpu_offload: true
+    num_output_chunks: 16
+  offload_activations: false
+  offload_embeddings: true
+  optimizer:
+    class_path: torch.optim.AdamW
+    cpu_offload: false
+    params:
+      fused: true
+      betas:
+      - 0.9
+      - 0.95
+      lr: 1.0e-05
+      weight_decay: 0.1
+  scheduler:
+    class_path: torchtune.modules.lr_schedulers.get_cosine_schedule_with_warmup
+    warmup_ratio: 0.1

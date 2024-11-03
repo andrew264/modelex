@@ -1,20 +1,18 @@
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from models.config import ModelCfg, PeftCfg
-from models.layers.attention import Attention
-from models.layers.mlp import MLP
-
-def exists(x: Optional[Any]) -> bool: return x is not None
+from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.modules.attention import Attention
+from modelex.modules.mlp import MLP
 
 class Block(nn.Module):
-    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None,) -> None:
+    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None, ) -> None:
         super().__init__()
         self.attn = Attention(cfg, layer_idx=layer_idx, peft_cfg=peft_cfg)
-        self.mlp = MLP(cfg, peft_cfg=peft_cfg,)
+        self.mlp = MLP(cfg, peft_cfg=peft_cfg, )
         self.sa_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
         self.mlp_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
     def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None, ):

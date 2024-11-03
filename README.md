@@ -8,7 +8,7 @@ To tokenize and save the dataset into a Parquet file, run:
 scripts/prepare_datasets.py --file {outputfile.parquet} --datasets classname:arg1,arg2
 ```
 
-### Example Class: `custom_data.chatlogs.Conversation`
+### Example Class: `modelex.datasets.Conversation`
 
 This class accepts the following arguments:
 
@@ -27,7 +27,7 @@ This class accepts the following arguments:
 ## Train Models
 
 To train a model
-- First set up the config at `model_directory/train.yaml`
+- First set up the config at `model_directory/trainer_config.yaml` see example [trainer_config.yaml](modelex/examples/trainer_config.yaml)
 - and run the following command
 ```bash
 python scripts/train.py model_directory/ train.parquet validate.parquet
@@ -41,23 +41,16 @@ python scripts/train.py model_directory/ train.parquet validate.parquet
     scripts/prompt.py model_directory/
     ```
 
-- To run the model in sentence completion mode, use:
-
-    ```bash
-    scripts/generate.py model_directory/
-    ```
-
 ## Configuration Files
 
 Configuration files are stored as `.yaml` files in `model_directory/`:
 
 - `model.yaml`: Contains model hyperparameters.
-- `train.yaml`: Contains training hyperparameters.
 - `peft.yaml`: Contains performance-efficient fine-tuning (PEFT) configurations such as LoRA.
 - `inference.yaml`: Contains model generation parameters such as `chat_format`, `top_p`, `eos_tokens`, etc.
 - `sysprompt.txt`: Stores the system prompt.
 
-Refer to `models/config.py` for more details.
+Refer to `modelex/models/llm/config.py` for more details.
 
 ## History
 

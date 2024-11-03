@@ -5,7 +5,7 @@ import llama_cpp
 import torch
 from torch import Tensor
 
-from utils.diskcache import tensor_cache
+from modelex.utils.diskcache import tensor_cache
 
 class GGUFModelLogits:
     def __init__(self, name: str, n_ctx: int = 8192, device: str = 'cpu'):

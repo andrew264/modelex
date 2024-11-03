@@ -6,13 +6,11 @@ class Cfg:
     def checks(self): return
     @classmethod
     def from_yaml(cls, path: str):
-        try:
-            with open(path, 'r', encoding='utf-8') as file: data = yaml.safe_load(file)
-            print(f"Loaded {cls.__name__} from {path}")
-            obj = cls(**data)
-            cls.checks(obj)
-            return obj
-        except FileNotFoundError: return None
+        with open(path, 'r', encoding='utf-8') as file: data = yaml.safe_load(file)
+        print(f"Loaded {cls.__name__} from {path}")
+        obj = cls(**data)
+        cls.checks(obj)
+        return obj
 
     def to_yaml(self, path: str):
         with open(path, 'w', encoding='utf-8') as file: yaml.dump(self.__dict__, file)

@@ -17,7 +17,7 @@ class ParquetCustomDataReader(Dataset):
         for i in range(len(self)): yield self[i]
 
 class ParquetTextDataset:
-    def __init__(self, path: str, tokenizer_path: Optional[str]=None) -> None:
+    def __init__(self, path: str, tokenizer_path: Optional[str] = None) -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path) if tokenizer_path else None
         self.parquet_files = glob.glob(f"{path}/**/*.parquet", recursive=True)
         self.file_row_counts = []

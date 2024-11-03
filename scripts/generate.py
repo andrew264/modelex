@@ -2,12 +2,12 @@ import argparse
 
 import torch
 
-from models.generation_handler import ModelGenerationHandler
+from modelex.generation import ModelGenerationHandler
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="generate sequence")
-    parser.add_argument("path", type=str, help="Path to the model (required)")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to run the model on (optional, defaults to 'cuda')")
+    parser.add_argument("path", type=str, help="Path to the models (required)")
+    parser.add_argument("--device", type=str, default="cuda", help="Device to run the models on (optional, defaults to 'cuda')")
 
     args = parser.parse_args()
     device = torch.device(args.device)

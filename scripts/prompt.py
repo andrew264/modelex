@@ -4,8 +4,8 @@ import os
 
 import torch
 
-from data_module.prompt_format import Prompt
-from models.generation_handler import ModelGenerationHandler
+from modelex.datasets.prompt_format import Prompt
+from modelex.generation import ModelGenerationHandler
 
 torch.set_float32_matmul_precision('high')
 
@@ -24,8 +24,8 @@ def multiline_input(name: str = 'User'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="generate sequence")
-    parser.add_argument("path", type=str, help="Path to the model (required)")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to run the model on (optional, defaults to 'cuda')")
+    parser.add_argument("path", type=str, help="Path to the models (required)")
+    parser.add_argument("--device", type=str, default="cuda", help="Device to run the models on (optional, defaults to 'cuda')")
     parser.add_argument("--name", type=str, default="user", help="Username (optional, defaults to 'user')")
     parser.add_argument("--botname", type=str, default="assistant", help="Username (optional, defaults to 'assistant')")
 

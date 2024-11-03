@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from models.config import ModelCfg, PeftCfg
+from modelex.models.llm.config import ModelCfg, PeftCfg
 
 class MLP(nn.Module):
     def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None) -> None:

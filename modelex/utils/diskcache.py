@@ -1,20 +1,19 @@
+import atexit
+import functools
+import hashlib
+import inspect
+import os
 import shutil
 import struct
 from collections import OrderedDict
 from typing import List, Union
+
 import torch
-import tempfile
-import os
-import hashlib
-import functools
-import atexit
-import inspect
 
 def tensor_cache(max_cache_size: Union[int, float] = 5):
     max_cache_size_mib = max_cache_size * 1024
     cache = OrderedDict()
     total_cache_size = 0
-    # temp_dir = tempfile.mkdtemp()
     home_dir = os.path.expanduser("~")
     cache_dir = os.path.join(home_dir, ".tensor_cache")
     os.makedirs(cache_dir, exist_ok=True)

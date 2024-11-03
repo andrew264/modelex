@@ -39,9 +39,9 @@ class Prompt(ChatFormat):
             case ChatFormatType.CUSTOM.value: self._apply_format(CustomFormat)
             case _: raise ValueError(f"Unknown chat_format: {chat_format}")
     def _apply_format(self, fmt: ChatFormat): self.BOT, self.EOT, self.SH, self.EH = fmt.BOT, fmt.EOT, fmt.SH, fmt.EH
-    def add_msg(self, user: str, msg: str)->None: self.msgs.append(Message(user=user, message=msg))
-    def add_msgs(self, msgs: list[Message])->None: self.msgs.extend(msgs)
-    def reset(self)->None: self.msgs = []
+    def add_msg(self, user: str, msg: str) -> None: self.msgs.append(Message(user=user, message=msg))
+    def add_msgs(self, msgs: list[Message]) -> None: self.msgs.extend(msgs)
+    def reset(self) -> None: self.msgs = []
     def get_prompt_for_completion(self) -> str:
         out = f'{self.BOT}{self.SH}system{self.EH}{self.sysprompt}{self.EOT}'
         for m in self.msgs: out += f'{self.SH}{m["user"]}{self.EH}{m["message"]}{self.EOT}'

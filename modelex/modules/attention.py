@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -7,9 +7,8 @@ import torch.nn.functional as F
 from torch import Tensor
 from torchtune.modules import KVCache
 
-from models.config import ModelCfg, PeftCfg
-
-def exists(x: Optional[Any]) -> bool: return x is not None
+from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.utils import exists
 
 def rotate_half(x: Tensor) -> Tensor:
     return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)

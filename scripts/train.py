@@ -7,10 +7,9 @@ from torchtune.modules.common_utils import _register_reparametrize_state_dict_ho
 from torchtune.modules.peft import get_adapter_params, set_trainable_params
 from torchtune.training import cleanup_before_training
 
-from models.config import ModelCfg, PeftCfg
-from models.llm import LLM
-from models.trainer import Trainer
-from utils import get_state_dict_from_safetensors, safe_save_file
+from modelex.models.llm import ModelCfg, PeftCfg, LLM
+from modelex.training import Trainer
+from modelex.utils import get_state_dict_from_safetensors, save_as_safetensors
 
 torch.set_float32_matmul_precision('high')
 
@@ -43,15 +42,15 @@ def main(path: str, ) -> None:
 
     if p_cfg: setup_model_for_peft(model, p_cfg)
 
-    trainer = Trainer(model, os.path.join(path, 'config.yaml'))
+    trainer = Trainer(model, os.path.join(path, 'trainer_config.yaml'))
     cleanup_before_training()
     trainer.train()
 
     if p_cfg:
         lora_params = remove_checkpoint_suffix(get_adapter_params(model))
-        safe_save_file(lora_params, os.path.join(path, 'adaptor.safetensors'))
+        save_as_safetensors(lora_params, os.path.join(path, 'adaptor.safetensors'))
     else:
-        safe_save_file(remove_checkpoint_suffix(model.state_dict()), os.path.join(path, 'model.safetensors'))
+        save_as_safetensors(remove_checkpoint_suffix(model.state_dict()), os.path.join(path, 'model.safetensors'))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="train model")

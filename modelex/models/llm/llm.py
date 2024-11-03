@@ -1,28 +1,21 @@
 import contextlib
 import os
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torchtune.modules import TiedLinear
 
-from models.config import ModelCfg, PeftCfg
-from models.layers.rotary_embedding import RotaryEmbedding
-from models.layers.transformer_block import Block
-
-def exists(x: Optional[Any]) -> bool: return x is not None
-
-class TiedLinear2(TiedLinear):
-    @property
-    def weight(self) -> Tensor: return self.tied_module.weight
+from modelex.modules import Block, RotaryEmbedding, TiedLinear2
+from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.utils import exists
 
 class LLM(nn.Module):
     def __init__(self, cfg: Union[ModelCfg, dict, str], peft_cfg: Optional[PeftCfg] = None) -> None:
         super(LLM, self).__init__()
         if isinstance(cfg, dict): cfg = ModelCfg(**cfg)
-        elif isinstance(cfg, str): cfg = ModelCfg.from_yaml(os.path.join(cfg, 'model.yaml'))
+        elif isinstance(cfg, str): cfg = ModelCfg.from_yaml(os.path.join(cfg, 'models.yaml'))
         self.cfg = cfg
 
         self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
@@ -77,7 +70,7 @@ class LLM(nn.Module):
             self._embedding_device = torch.device('cpu')
         else:
             self._embedding_device = self.output.weight.device
-        print(f'Offloading tok_embeddings to {self._embedding_device.type} | Layer size: {(self.tok_embeddings.weight.nbytes / (1024**2)):.3f} MiB')
+        print(f'Offloading tok_embeddings to {self._embedding_device.type} | Layer size: {(self.tok_embeddings.weight.nbytes / (1024 ** 2)):.3f} MiB')
         self.tok_embeddings = self.tok_embeddings.to(device=self._embedding_device)
     def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, ) -> Union[Tensor, list[Tensor]]:
         device = input_ids.device

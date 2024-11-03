@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from transformers import ROPE_INIT_FUNCTIONS
 
-from models.config import ModelCfg
+from modelex.models.llm.config import ModelCfg
 
 class RotaryEmbedding(nn.Module):
     def __init__(self, cfg: ModelCfg):

@@ -7,8 +7,8 @@ from typing import Dict, List, Optional, Type, TypedDict, Union
 import numpy as np
 from tokenizers import Tokenizer
 
-from data_module.prompt_format import ChatFormatType, ChatFormat, Llama3Format, Gemma2Format, CustomFormat
-from utils import str2bool
+from modelex.datasets.prompt_format import ChatFormat, ChatFormatType, CustomFormat, Gemma2Format, Llama3Format
+from modelex.utils import str2bool
 
 class Message(TypedDict):
     user: str
@@ -37,7 +37,7 @@ class Conversations(ChatFormat):
             case ChatFormatType.CUSTOM.value: self._apply_format(CustomFormat)
             case _: raise ValueError(f"Unknown chat_format: {chat_format}")
     def _apply_format(self, fmt: Type[ChatFormat]): self.BOT, self.EOT, self.SH, self.EH = fmt.BOT, fmt.EOT, fmt.SH, fmt.EH
-    def __len__(self,)->int: return len(self._files)
+    def __len__(self, ) -> int: return len(self._files)
     def _get_encoded(self, data: List[Message]) -> Dict[str, np.ndarray]:
         ids, labels = [], []
         sp = self._tokenizer.encode(f'{self.BOT}{self.SH}system{self.EH}{self._sysprompt}{self.EOT}'.strip(), add_special_tokens=False)
@@ -49,7 +49,7 @@ class Conversations(ChatFormat):
             if t and self.enable_thoughts:
                 t = f'<think>{t.strip()}</think>\n'
             m = self._tokenizer.encode(f'{t}{msg["message"]}{self.EOT}', add_special_tokens=False)
-            combined = u.ids+m.ids
+            combined = u.ids + m.ids
             ids.extend(combined)
             if msg['user'] == self._assistant_name: labels.extend(([self.CROSS_ENTROPY_IGNORE_IDX] * len(u.ids)) + m.ids)
             else: labels.extend([self.CROSS_ENTROPY_IGNORE_IDX] * len(combined))

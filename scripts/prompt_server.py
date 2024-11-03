@@ -6,8 +6,8 @@ from typing import Optional, Tuple
 import litserve as ls
 import torch
 
-from data_module.prompt_format import Message, Prompt
-from models.generation_handler import ModelGenerationHandler
+from modelex.datasets.prompt_format import Message, Prompt
+from modelex.generation import ModelGenerationHandler
 
 class ModelAPI(ls.LitAPI):
     def __init__(self, path: str, assistant_name: str):
@@ -39,8 +39,8 @@ class ModelAPI(ls.LitAPI):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="generate sequence")
-    parser.add_argument("path", type=str, help="Path to the model (required)")
-    parser.add_argument("--device", type=str, default="0", help="Device to run the model on (optional, defaults to 'gpu 0')")
+    parser.add_argument("path", type=str, help="Path to the models (required)")
+    parser.add_argument("--device", type=str, default="0", help="Device to run the models on (optional, defaults to 'gpu 0')")
     parser.add_argument("--botname", type=str, default="assistant", help="Username (optional, defaults to 'assistant')")
     args = parser.parse_args()
 

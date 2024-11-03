@@ -2,18 +2,16 @@ import gc
 import glob
 import os
 import time
-from typing import Any, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 from tokenizers import Tokenizer
 from torchtune.generation import generate
 from torchtune.modules.peft import get_merged_lora_ckpt
 
-from models.config import InferenceCfg, ModelCfg, PeftCfg
-from models.llm import LLM
-from utils import get_state_dict_from_safetensors
-
-def exists(x: Optional[Any]) -> bool: return x is not None
+from modelex.models.llm import LLM
+from modelex.models.llm.config import InferenceCfg, ModelCfg, PeftCfg
+from modelex.utils import exists, get_state_dict_from_safetensors
 
 class ModelGenerationHandler:
     def __init__(self, path: str, device: Union[str, torch.device]):
@@ -43,11 +41,11 @@ class ModelGenerationHandler:
         adaptor_sd = {}
         model_files = [os.path.abspath(path) for path in glob.glob(os.path.join(self.path, 'model*.safetensors'))]
         if model_files: model_sd = get_state_dict_from_safetensors(model_files, torch.device('cpu'))
-        else: raise FileNotFoundError("Model file not found.")
+        else: raise FileNotFoundError(f"Model file not found in {model_files}.")
         if self.p_cfg: adaptor_sd = get_state_dict_from_safetensors(os.path.join(self.path, 'adaptor.safetensors'), torch.device('cpu'))
 
         model = LLM(self.cfg).bfloat16()
-        model.load_state_dict(model_sd, strict=False, assign=True)  # converts the keys to suit the model
+        model.load_state_dict(model_sd, strict=False, assign=True)  # converts the keys to suit the models
 
         if adaptor_sd: model_sd = get_merged_lora_ckpt(model.state_dict() | adaptor_sd, rank=self.p_cfg.rank, alpha=self.p_cfg.alpha)
         model.load_state_dict(model_sd, strict=False, assign=True)

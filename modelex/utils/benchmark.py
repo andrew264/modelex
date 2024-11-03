@@ -1,6 +1,5 @@
 import gc
 import statistics
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
 
@@ -12,11 +11,8 @@ from matplotlib import pyplot as plt
 from tabulate import tabulate
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from models.config import ModelCfg
-from models.layers.attention import Attention
-from models.layers.mlp import MLP
-from models.layers.transformer_block import Block
-from models.llm import LLM
+from modelex.models.llm import LLM, ModelCfg
+from modelex.modules import Attention, Block, MLP
 
 ############################################################################################################
 ### config
@@ -97,9 +93,9 @@ def plot_execution_times(func_name: str, execution_times: List[float], kwargs: D
 
     plt.legend()
     plt.tight_layout()
-    Path('plots').mkdir(exist_ok=True)
+    Path('./plots').mkdir(exist_ok=True)
 
-    filename = f'plots/{func_name}.png'
+    filename = f'./plots/{func_name}.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Plot saved as {filename}")
@@ -159,8 +155,8 @@ def model_inputs(device, dtype) -> dict:
 
 def attn_inputs(device, dtype) -> dict:
     return {'x': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.hidden_size), dtype=dtype, device=device), 'freqs': (
-    torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
-    torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device))}
+        torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
+        torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device))}
 
 def transformer_block_inputs(device, dtype) -> dict:
     return {'x': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.hidden_size), dtype=dtype, device=device), }
@@ -173,15 +169,11 @@ def main():
     benchmark_tasks: Dict[Callable, Dict[str, Any]] = {
         torch.matmul: {'input': torch.randn((dummy_cfg.hidden_size, dummy_cfg.max_position_embeddings), dtype=dtype, device=device),
                        'other': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.vocab_size), dtype=dtype, device=device)},
-        flash_scaled_dot_product_attention: sdpa_inputs(device, dtype),
-        mem_eff_scaled_dot_product_attention: sdpa_inputs(device, dtype),
-        cudnn_scaled_dot_product_attention: sdpa_inputs(device, dtype),
-        F.rms_norm: rms_norm_inputs(device, dtype),
+        flash_scaled_dot_product_attention: sdpa_inputs(device, dtype), mem_eff_scaled_dot_product_attention: sdpa_inputs(device, dtype),
+        cudnn_scaled_dot_product_attention: sdpa_inputs(device, dtype), F.rms_norm: rms_norm_inputs(device, dtype),
 
-        attention_block: attn_inputs(device, dtype),
-        mlp_block: transformer_block_inputs(device, dtype),
-        transformer_block: attn_inputs(device, dtype),
-        full_model_forward: model_inputs(device, dtype)}
+        attention_block: attn_inputs(device, dtype), mlp_block: transformer_block_inputs(device, dtype),
+        transformer_block: attn_inputs(device, dtype), full_model_forward: model_inputs(device, dtype)}
 
     print("Starting benchmark suite...")
     for func, kwargs in benchmark_tasks.items():
