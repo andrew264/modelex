@@ -27,10 +27,7 @@ class ModelCfg(Cfg):
     initializer_range: float = 0.02
 
     # rope
-    rope_type: str = 'default'
-    rope_factor: float = 1.
-    rope_theta: float = 10000.
-    partial_rotary_factor: float = 1.
+    rope_base: float = 10000.
 
     # MLP
     intermediate_size: int = 8192

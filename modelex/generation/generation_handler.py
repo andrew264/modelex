@@ -89,6 +89,9 @@ class ModelGenerationHandler:
 
         start = time.time()
         top_k = self.infer_cfg.top_k if 1 <= self.infer_cfg.top_k <= self.cfg.vocab_size else None
+        if min(max_new_tokens, self.model.cfg.max_seq_len - encoded_len) < max_new_tokens:
+            tokens = tokens[:, -(self.model.cfg.max_seq_len - max_new_tokens):]
+            encoded_len = tokens.size(1)
         out, _ = generate(self.model, tokens, max_generated_tokens=max_new_tokens, pad_id=self.cfg.pad_token, temperature=self.infer_cfg.temperature,
                           top_k=top_k, stop_tokens=self.infer_cfg.eos_tokens)
         out = out[0].tolist()
