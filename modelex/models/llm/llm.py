@@ -68,9 +68,9 @@ class LLM(nn.Module):
     def offload_embeddings(self, offload: bool = True):
         if offload:
             self._embedding_device = torch.device('cpu')
+            print(f'Offloading tok_embeddings to {self._embedding_device.type} | Size: {(self.tok_embeddings.weight.nbytes / (1024 ** 2)):.3f} MiB')
         else:
             self._embedding_device = self.output.weight.device
-        print(f'Offloading tok_embeddings to {self._embedding_device.type} | Layer size: {(self.tok_embeddings.weight.nbytes / (1024 ** 2)):.3f} MiB')
         self.tok_embeddings = self.tok_embeddings.to(device=self._embedding_device)
     def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, ) -> Union[Tensor, list[Tensor]]:
         device = input_ids.device

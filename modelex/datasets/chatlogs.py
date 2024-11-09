@@ -2,12 +2,12 @@ import datetime
 import glob
 import json
 import os
-from typing import Dict, List, Optional, Type, TypedDict, Union
+from typing import Dict, List, Optional, TypedDict, Union
 
 import numpy as np
 from tokenizers import Tokenizer
 
-from modelex.datasets.prompt_format import ChatFormat, ChatFormatType, CustomFormat, Gemma2Format, Llama3Format
+from modelex.datasets.prompt_format import ChatFormat, ChatFormatFactory, ChatFormatType
 from modelex.utils import str2bool
 
 class Message(TypedDict):
@@ -17,7 +17,7 @@ class Message(TypedDict):
 
 class Conversations(ChatFormat):
     CROSS_ENTROPY_IGNORE_IDX = -100
-    def __init__(self, path: str, tokenizer_path: str, chat_format: str = "llama3", enable_thoughts: Union[bool, str] = True) -> None:
+    def __init__(self, path: str, tokenizer_path: str, chat_format: str = "llama3", enable_thoughts: Union[bool, str] = False) -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path)
         self._files = glob.glob(f'{path}/**/*.json', recursive=True)
         self._sysprompt = ''
@@ -25,18 +25,15 @@ class Conversations(ChatFormat):
         with open(os.path.join(path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: self._sysprompt = f.read().format(datetime=dt).strip()
         self._assistant_name = 'assistant'
         with open(os.path.join(path, 'name'), 'r', encoding='utf-8') as f: self._assistant_name = f.read()
-        self.select_format(chat_format=chat_format)
+        self._apply_format(chat_format)
         if isinstance(enable_thoughts, str):
             self.enable_thoughts = str2bool(enable_thoughts)
         else:
             self.enable_thoughts = enable_thoughts
-    def select_format(self, chat_format: str):
-        match chat_format:
-            case ChatFormatType.LLAMA3.value: self._apply_format(Llama3Format)
-            case ChatFormatType.GEMMA2.value: self._apply_format(Gemma2Format)
-            case ChatFormatType.CUSTOM.value: self._apply_format(CustomFormat)
-            case _: raise ValueError(f"Unknown chat_format: {chat_format}")
-    def _apply_format(self, fmt: Type[ChatFormat]): self.BOT, self.EOT, self.SH, self.EH = fmt.BOT, fmt.EOT, fmt.SH, fmt.EH
+    def _apply_format(self, chat_format: str):
+        fmt = ChatFormatFactory.create(ChatFormatType(chat_format))
+        self.BOT, self.EOT = fmt.BOT, fmt.EOT
+        self.SH, self.EH = fmt.SH, fmt.EH
     def __len__(self, ) -> int: return len(self._files)
     def _get_encoded(self, data: List[Message]) -> Dict[str, np.ndarray]:
         ids, labels = [], []

@@ -4,7 +4,7 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 
-def get_state_dict_from_safetensors(path: str | list[str], device: torch.device = torch.device('cpu')) -> dict:
+def get_state_dict_from_safetensors(path: str | list[str], device: torch.device = torch.device('cpu'), dtype: torch.dtype = torch.bfloat16) -> dict:
     state_dict = {}
     if isinstance(path, str): path = [path]
     if path:
@@ -12,7 +12,7 @@ def get_state_dict_from_safetensors(path: str | list[str], device: torch.device 
         d = device.type if device.type == 'cpu' else device.index
         for p in path:
             with safe_open(p, framework="pt", device=d) as f:
-                for k in f.keys(): state_dict[k] = f.get_tensor(k)
+                for k in f.keys(): state_dict[k] = f.get_tensor(k).to(dtype=dtype)
         if device.type != 'cpu': torch.cuda.synchronize(device)
         print(f"Loaded weights from {path} in {time.time() - start:.3f}s.")
     else: print("No weights found.")

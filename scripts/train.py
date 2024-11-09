@@ -9,7 +9,7 @@ from torchtune.training import cleanup_before_training
 
 from modelex.models.llm import ModelCfg, PeftCfg, LLM
 from modelex.training import Trainer
-from modelex.utils import get_state_dict_from_safetensors, save_as_safetensors
+from modelex.utils import convert_hf_state_dict, get_state_dict_from_safetensors, has_hf_keys, save_as_safetensors
 
 torch.set_float32_matmul_precision('high')
 
@@ -37,8 +37,10 @@ def main(path: str, ) -> None:
     if not model_sd: model.apply(model._init_weights)
 
     if p_cfg and p_cfg.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)
-    _, unexpected = model.load_state_dict(model_sd, strict=False)
-    print("Unexpected Keys: ", unexpected)
+    if model_sd:
+        if has_hf_keys(model_sd): model_sd = convert_hf_state_dict(model_sd)
+        _, unexpected = model.load_state_dict(model_sd, strict=False)
+        print("Unexpected Keys: ", unexpected)
 
     if p_cfg: setup_model_for_peft(model, p_cfg)
 

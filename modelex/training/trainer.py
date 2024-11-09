@@ -153,7 +153,9 @@ class Trainer:  # to new beginnings ig
             set_activation_checkpointing(self.model, auto_wrap_policy=checkpointing_layers)
 
         ### Offload Embeddings
-        self.model.offload_embeddings(self.config.training.offload_embeddings)
+        if self.config.training.offload_embeddings:
+            assert self.model.cfg.tie_word_embeddings is False, "pls, dont offload tied_embeddings to cpu"
+            self.model.offload_embeddings(self.config.training.offload_embeddings)
 
         kd_config = self.config.training.kd
         if exists(kd_config):
