@@ -23,12 +23,11 @@ class ModelAPI(ls.LitAPI):
         torch.set_float32_matmul_precision('high')
         self.model_handler = ModelGenerationHandler(self.path, self.device)
         self.model_handler.load_model(compiled=False)
-        with open(os.path.join(self.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: self.sysprompt = f.read().strip()
 
     def decode_request(self, request, **kwargs) -> list[Message]: return request['msgs']
-    def predict(self, x, **kwargs) -> Tuple[str, int]:
-        dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
-        p = Prompt(assistant_name=self.assistant_name, sysprompt=self.sysprompt.format(datetime=dt), chat_format=self.model_handler.prompt_format)
+    def predict(self, x: list[Message], **kwargs) -> Tuple[str, int]:
+        sp = x.pop(0)
+        p = Prompt(assistant_name=sp['user'], sysprompt=sp['message'], chat_format=self.model_handler.prompt_format)
         p.add_msgs(x)
         decoded, _, total_toks, _ = self.model_handler.generate(p.get_prompt_for_completion(), max_new_tokens=1024)
         return decoded, total_toks

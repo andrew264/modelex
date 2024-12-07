@@ -83,6 +83,8 @@ class LLM(nn.Module):
             for layer in self.layers:
                 x = layer(x=x, freqs=freqs, attn_mask=mask)
             x = self.norm(x)
+        if self.output.weight.device != x.device:
+            x = x.to(self.output.weight.device)
         if self.num_output_chunks > 1:
             return self.chunked_output(x)
-        else: return self.output(x)
+        return self.output(x)

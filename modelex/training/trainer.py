@@ -64,11 +64,20 @@ class Trainer:  # to new beginnings ig
 
     def _setup_model(self):
         self.device = torch.device(self.config.training.device)
-        self.model.to(device=self.device)
+        model = self.model
+        if self.config.training.offload_embeddings:
+            model.tok_embeddings.to('cpu')
+            model.rotary_emb.to(device=self.device)
+            model.layers.to(device=self.device)
+            model.norm.to(device=self.device)
+            if not model.cfg.tie_word_embeddings:
+                model.output.to(device=self.device)
+        else:
+            model.to(device=self.device)
 
         ### Offload Activations to CPU
         if self.config.training.offload_activations:
-            self.model.set_offload_context(OffloadActivations(use_streams=True, max_fwd_stash_size=2))
+            model.set_offload_context(OffloadActivations(use_streams=True, max_fwd_stash_size=2))
 
     def _setup_optimizer(self):
         opt_config = self.config.training.optimizer
@@ -154,7 +163,6 @@ class Trainer:  # to new beginnings ig
 
         ### Offload Embeddings
         if self.config.training.offload_embeddings:
-            assert self.model.cfg.tie_word_embeddings is False, "pls, dont offload tied_embeddings to cpu"
             self.model.offload_embeddings(self.config.training.offload_embeddings)
 
         kd_config = self.config.training.kd

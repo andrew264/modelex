@@ -42,9 +42,11 @@ class Conversations(ChatFormat):
         labels.extend([self.CROSS_ENTROPY_IGNORE_IDX] * len(sp.ids))
         for msg in data:
             u = self._tokenizer.encode(f'{self.SH}{msg["user"]}{self.EH}', add_special_tokens=False)
-            t: str = msg.get('thoughts', '')
-            if t and self.enable_thoughts:
+            if self.enable_thoughts:
+                t: str = msg.get('thoughts', '')
                 t = f'<think>{t.strip()}</think>\n'
+            else:
+                t = ''
             m = self._tokenizer.encode(f'{t}{msg["message"]}{self.EOT}', add_special_tokens=False)
             combined = u.ids + m.ids
             ids.extend(combined)
