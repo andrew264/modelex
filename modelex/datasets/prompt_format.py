@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Dict, Type, TypedDict
+from typing import Dict, Self, Type, TypedDict
 
 class Message(TypedDict):
     user: str
@@ -58,10 +58,11 @@ class ChatFormatFactory:
         if format_type not in cls._formats: raise ValueError(f"Unsupported format type: {format_type}")
         return cls._formats[format_type]()
 
-class Prompt(ChatFormat):
-    def __init__(self, assistant_name: str, sysprompt: str, chat_format: str = "llama3") -> None:
+DEFAULT_SYSTEM_PROMPT = "You are an intelligent and helpful assistant"
+
+class PromptFormatter(ChatFormat):
+    def __init__(self, assistant_name: str = "assistant", chat_format: str = "llama3") -> None:
         self.assistant_name = assistant_name
-        self.sysprompt = sysprompt
         self._apply_format(chat_format)
         self.msgs: list[Message] = []
     def _apply_format(self, chat_format: str):
@@ -69,13 +70,21 @@ class Prompt(ChatFormat):
         self.BOT, self.EOT = fmt.BOT, fmt.EOT
         self.SH, self.EH = fmt.SH, fmt.EH
     def __str__(self) -> str:
-        out = f'{self.BOT}{self.SH}system{self.EH}{self.sysprompt}{self.EOT}'
-        for m in self.msgs: out += f'{self.SH}{m["user"]}{self.EH}{m["message"]}{self.EOT}'
+        sysprompt = DEFAULT_SYSTEM_PROMPT
+        msgs = self.msgs.copy()
+        if msgs[0]['user'] == 'system':
+            sysprompt = msgs.pop(0)['message']
+        out = f'{self.BOT}{self.SH}system{self.EH}{sysprompt}{self.EOT}'
+        for m in msgs: out += f'{self.SH}{m["user"]}{self.EH}{m["message"]}{self.EOT}'
         return out
-    def add_msg(self, user: str, msg: str) -> None: self.msgs.append(Message(user=user, message=msg))
-    def add_msgs(self, msgs: list[Message]) -> None: self.msgs.extend(msgs)
-    def reset(self) -> None: self.msgs = []
+    def add_msg(self, user: str, msg: str) -> Self:
+        self.msgs.append(Message(user=user, message=msg))
+        return self
+    def add_msgs(self, msgs: list[Message]) -> Self:
+        self.msgs.extend(msgs)
+        return self
+    def reset(self) -> Self:
+        self.msgs: list[Message] = []
+        return self
     def get_prompt_for_completion(self) -> str:
-        out = str(self)
-        out += f'{self.SH}{self.assistant_name}{self.EH}'
-        return out
+        return str(self) + f'{self.SH}{self.assistant_name}{self.EH}'

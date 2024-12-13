@@ -4,7 +4,7 @@ import os
 
 import torch
 
-from modelex.datasets.prompt_format import Prompt
+from modelex.datasets.prompt_format import PromptFormatter
 from modelex.generation import ModelGenerationHandler
 
 torch.set_float32_matmul_precision('high')
@@ -37,7 +37,7 @@ if __name__ == '__main__':
     dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
     with open(os.path.join(args.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: sysprompt = f.read().format(datetime=dt).strip()
 
-    prompt = Prompt(args.botname, sysprompt, chat_format=model_handler.prompt_format)
+    prompt = PromptFormatter(args.botname, chat_format=model_handler.prompt_format).add_msg('system', sysprompt)
 
     while True:
         inp = multiline_input(args.name)
