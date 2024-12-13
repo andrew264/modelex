@@ -9,6 +9,12 @@ from modelex.generation import ModelGenerationHandler
 
 torch.set_float32_matmul_precision('high')
 
+parser = argparse.ArgumentParser(description="generate sequence")
+parser.add_argument("path", type=str, help="Path to the models (required)")
+parser.add_argument("--device", type=str, default="cuda", help="Device to run the models on (optional, defaults to 'cuda')")
+parser.add_argument("--name", type=str, default="user", help="Username (optional, defaults to 'user')")
+parser.add_argument("--botname", type=str, default="assistant", help="Username (optional, defaults to 'assistant')")
+
 def multiline_input(name: str = 'User'):
     lines = []
     print(f'{name}: ', end="", flush=True)
@@ -22,14 +28,7 @@ def multiline_input(name: str = 'User'):
             break
     return '\n'.join(lines)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="generate sequence")
-    parser.add_argument("path", type=str, help="Path to the models (required)")
-    parser.add_argument("--device", type=str, default="cuda", help="Device to run the models on (optional, defaults to 'cuda')")
-    parser.add_argument("--name", type=str, default="user", help="Username (optional, defaults to 'user')")
-    parser.add_argument("--botname", type=str, default="assistant", help="Username (optional, defaults to 'assistant')")
-
-    args = parser.parse_args()
+def main(args):
     device = torch.device(args.device)
     model_handler = ModelGenerationHandler(args.path, device=device, )
     model_handler.load_model()
@@ -51,3 +50,6 @@ if __name__ == '__main__':
 
         print(f"{args.botname}: {decoded}")
         print(f"Generated {num_tokens} tokens in {generation_time:.3f}s ({num_tokens / generation_time:.3f} tokens/s)")
+
+if __name__ == '__main__':
+    main(args=parser.parse_args())

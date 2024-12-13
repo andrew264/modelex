@@ -13,6 +13,9 @@ from modelex.utils import convert_hf_state_dict, get_state_dict_from_safetensors
 
 torch.set_float32_matmul_precision('high')
 
+parser = argparse.ArgumentParser(description="train model")
+parser.add_argument("path", type=str, help="Path to the model (required)")
+
 def setup_model_for_peft(model: torch.nn.Module, p_cfg: PeftCfg) -> None:
     set_trainable_params(model, get_adapter_params(model))
     if p_cfg.type == 'dora':
@@ -23,7 +26,8 @@ def remove_checkpoint_suffix(state_dict: dict) -> dict:
     act_ckpt_wrapped_module = "._checkpoint_wrapped_module"
     return {k.replace(act_ckpt_wrapped_module, ''): v for k, v in state_dict.items()}
 
-def main(path: str, ) -> None:
+def main(args) -> None:
+    path: str = args.path
     cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
     p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
     print('=' * 75)
@@ -55,7 +59,4 @@ def main(path: str, ) -> None:
         save_as_safetensors(remove_checkpoint_suffix(model.state_dict()), os.path.join(path, 'model.safetensors'))
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="train model")
-    parser.add_argument("path", type=str, help="Path to the model (required)")
-    args = parser.parse_args()
-    main(args.path)
+    main(args=parser.parse_args())

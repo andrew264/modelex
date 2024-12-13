@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelex"
+version = "0.1"
+requires-python = ">=3.11"
+authors = [
+  {name = "Andrew Santhosh"},
+]
+readme = "README.md"
+license = {file = "LICENSE"}
+dependencies = [
+    "torch",
+    "safetensors",
+    "litserve",
+    "torchtune",
+    "tokenizers",
+    "pyarrow",
+    "numpy",
+    "llama-cpp-python",
+    "seaborn",
+    "matplotlib",
+    "tabulate",
+    "torchao",
+    "tqdm",
+    "pydantic",
+]
+
+[project.urls]
+Repository = "https://github.com/andrew264/modelex.git"
+
+[project.scripts]
+modelex = "modelex:main"

@@ -144,7 +144,8 @@ def sdpa_inputs(device, dtype) -> dict:
         'query': torch.randn((batch_size, dummy_cfg.num_heads, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
         'key': torch.randn((batch_size, dummy_cfg.num_heads, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
         'value': torch.randn((batch_size, dummy_cfg.num_heads, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
-        'is_causal': True}
+        'is_causal': True
+    }
 
 def rms_norm_inputs(device, dtype) -> dict:
     return {'input': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.hidden_size), dtype=dtype, device=device),
@@ -154,9 +155,9 @@ def model_inputs(device, dtype) -> dict:
     return {'input_ids': torch.randint(dummy_cfg.vocab_size, (batch_size, dummy_cfg.max_position_embeddings), device=device)}
 
 def attn_inputs(device, dtype) -> dict:
-    return {'x': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.hidden_size), dtype=dtype, device=device), 'freqs': (
-        torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
-        torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device))}
+    return {'x': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.hidden_size), dtype=dtype, device=device),
+            'freqs': (torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device),
+                      torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.head_dim), dtype=dtype, device=device))}
 
 def transformer_block_inputs(device, dtype) -> dict:
     return {'x': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.hidden_size), dtype=dtype, device=device), }
@@ -169,11 +170,16 @@ def main():
     benchmark_tasks: Dict[Callable, Dict[str, Any]] = {
         torch.matmul: {'input': torch.randn((dummy_cfg.hidden_size, dummy_cfg.max_position_embeddings), dtype=dtype, device=device),
                        'other': torch.randn((batch_size, dummy_cfg.max_position_embeddings, dummy_cfg.vocab_size), dtype=dtype, device=device)},
-        flash_scaled_dot_product_attention: sdpa_inputs(device, dtype), mem_eff_scaled_dot_product_attention: sdpa_inputs(device, dtype),
-        cudnn_scaled_dot_product_attention: sdpa_inputs(device, dtype), F.rms_norm: rms_norm_inputs(device, dtype),
+        flash_scaled_dot_product_attention: sdpa_inputs(device, dtype),
+        mem_eff_scaled_dot_product_attention: sdpa_inputs(device, dtype),
+        cudnn_scaled_dot_product_attention: sdpa_inputs(device, dtype),
+        F.rms_norm: rms_norm_inputs(device, dtype),
 
-        attention_block: attn_inputs(device, dtype), mlp_block: transformer_block_inputs(device, dtype),
-        transformer_block: attn_inputs(device, dtype), full_model_forward: model_inputs(device, dtype)}
+        attention_block: attn_inputs(device, dtype),
+        mlp_block: transformer_block_inputs(device, dtype),
+        transformer_block: attn_inputs(device, dtype),
+        full_model_forward: model_inputs(device, dtype)
+    }
 
     print("Starting benchmark suite...")
     for func, kwargs in benchmark_tasks.items():

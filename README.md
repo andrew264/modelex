@@ -5,7 +5,7 @@
 To tokenize and save the dataset into a Parquet file, run:
 
 ```bash
-scripts/prepare_datasets.py --file {outputfile.parquet} --datasets classname:arg1,arg2
+modelex prepare_dataset --file {outputfile.parquet} --datasets classname:arg1,arg2
 ```
 
 ### Example Class: `modelex.datasets.Conversation`
@@ -30,7 +30,7 @@ To train a model
 - First set up the config at `model_directory/trainer_config.yaml` see example [trainer_config.yaml](modelex/examples/trainer_config.yaml)
 - and run the following command
 ```bash
-python scripts/train.py model_directory/ train.parquet validate.parquet
+modelex train model_directory/ train.parquet validate.parquet
 ```
 
 ## Run Models
@@ -38,7 +38,7 @@ python scripts/train.py model_directory/ train.parquet validate.parquet
 - To run the model in chat mode, use:
 
     ```bash
-    scripts/prompt.py model_directory/
+    modelex prompt model_directory/
     ```
 
 ## Configuration Files
@@ -58,7 +58,7 @@ This project was originally hosted at [andrew264/SmolLM](https://github.com/andr
 
 ## Future Plans
 
-The goal is to build a multi-model LLM that supports any-to-any data modality. Experimentation for this is ongoing at:
+The goal is to build a multimodal LLM that supports any-to-any data modality. Experimentation for this is ongoing at:
 
 - [ImageExpts](https://github.com/andrew264/ImageExpts)
 - [AudioExpts](https://github.com/andrew264/AudioExpts)

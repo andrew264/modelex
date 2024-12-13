@@ -1,6 +1,6 @@
 import argparse
 import importlib
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -21,7 +21,17 @@ def create_instance_from_string(class_path: str, *args):
     cls = getattr(module, class_name)
     return cls(*args)
 
-def main(out_file: str, datasets: List[Tuple[str, List[str]]]) -> None:
+parser = argparse.ArgumentParser(description="write dataset into parquet")
+parser.add_argument("--file", help="Path to save the dataset (required)", nargs=1)
+parser.add_argument('--datasets', type=parse_class_args, help="List of class names with args, e.g., 'ClassName:arg1,arg2'")
+
+def main(args) -> None:
+    out_file = args.file[0]
+    if args.datasets:
+        datasets = [item for item in args.datasets.items()]
+    else:
+        raise ValueError('No datasets were provided')
+
     schema = pa.schema([('input_ids', pa.int32()), ('labels', pa.int32()), ])
     with pq.ParquetWriter(out_file, schema) as writer:
         for d in datasets:
@@ -30,13 +40,4 @@ def main(out_file: str, datasets: List[Tuple[str, List[str]]]) -> None:
                 writer.write_table(table)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="write dataset into parquet")
-    parser.add_argument("--file", help="Path to save the dataset (required)", nargs=1)
-    parser.add_argument('--datasets', type=parse_class_args, help="List of class names with args, e.g., 'ClassName:arg1,arg2'")
-    args = parser.parse_args()
-    out_file = args.file[0]
-    if args.datasets:
-        datasets = [item for item in args.datasets.items()]
-        main(out_file=out_file, datasets=datasets)
-    else:
-        raise ValueError('No datasets were provided')
+    main(args=parser.parse_args())
