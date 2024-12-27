@@ -37,6 +37,7 @@ class GradClipConfig(BaseModel):
     max_norm: float = Field(1.0, gt=0.0)
 
 class TrainingConfig(BaseModel):
+    compile: bool = False
     epochs: int = Field(..., gt=0)
     batch_size: int = Field(..., gt=0)
     gradient_accumulation_steps: int = Field(1, gt=0)
@@ -67,7 +68,7 @@ class CollateFnConfig(BaseModel, Instanceable):
 class DataConfig(BaseModel):
     train_dataset: DatasetConfig
     valid_dataset: Optional[DatasetConfig] = None
-    num_workers: int = Field(4, ge=0)
+    num_workers: int = Field(0, ge=0)
     pin_memory: bool = True
     collate_fn: Optional[CollateFnConfig] = None
 

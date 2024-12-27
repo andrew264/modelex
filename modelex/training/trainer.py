@@ -20,7 +20,7 @@ from tqdm import tqdm
 from modelex.models.gguf_model import GGUFModelLogits
 from modelex.models.llm import LLM
 from modelex.training.trainer_config import TrainerConfig
-from modelex.utils import exists
+from modelex.utils import exists, model_summary
 
 def get_instance(class_path) -> Any:
     module_path, class_name = class_path.rsplit('.', 1)
@@ -61,6 +61,7 @@ class Trainer:  # to new beginnings ig
         self._setup_loss()
         self._setup_logger()
         self._setup_misc()
+        model_summary(self.model)
 
     def _setup_model(self):
         self.device = torch.device(self.config.training.device)
@@ -78,6 +79,9 @@ class Trainer:  # to new beginnings ig
         ### Offload Activations to CPU
         if self.config.training.offload_activations:
             model.set_offload_context(OffloadActivations(use_streams=True, max_fwd_stash_size=2))
+
+        if self.config.training.compile:
+            self.model.forward = torch.compile(self.model.forward, mode='max-autotune')
 
     def _setup_optimizer(self):
         opt_config = self.config.training.optimizer

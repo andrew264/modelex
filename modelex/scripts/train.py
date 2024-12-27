@@ -29,7 +29,9 @@ def remove_checkpoint_suffix(state_dict: dict) -> dict:
 def main(args) -> None:
     path: str = args.path
     cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
-    p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
+    if os.path.exists(os.path.join(path, 'peft.yaml')):
+        p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
+    else: p_cfg = None
     print('=' * 75)
     print("Path: ", path)
     if p_cfg: print(p_cfg)
