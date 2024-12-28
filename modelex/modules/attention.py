@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from torch import Tensor
 from torchtune.modules import KVCache
 
-from modelex.models.llm.config import LLMConfig
 from modelex.utils import exists
 
 def rotate_half(x: Tensor) -> Tensor:
@@ -21,7 +20,7 @@ def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsquee
     return q_embed, k_embed
 
 class Attention(nn.Module):
-    def __init__(self, cfg: LLMConfig, layer_idx: int,):
+    def __init__(self, cfg, layer_idx: int,):
         super(Attention, self).__init__()
         self.cfg = cfg
         self.layer_idx = layer_idx

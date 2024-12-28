@@ -11,7 +11,8 @@ from matplotlib import pyplot as plt
 from tabulate import tabulate
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from modelex.models.llm import LLM, LLMConfig
+from modelex.models.llm.model import LLM
+from modelex.models.llm.config import LLMConfig
 from modelex.modules import Attention, Block, MLP
 
 ############################################################################################################

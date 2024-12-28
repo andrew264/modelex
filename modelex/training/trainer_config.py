@@ -46,9 +46,9 @@ class TrainingConfig(BaseModel):
     checkpointing_layers: List[str] = Field(default_factory=list, description='List of layer names to apply gradient checkpointing')
     grad_clip: GradClipConfig = Field(default_factory=GradClipConfig)
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
-    scheduler: Optional[SchedulerConfig] = Field(default_factory=SchedulerConfig)
+    scheduler: Optional[SchedulerConfig] = None
     loss: LossConfig = Field(default_factory=LossConfig)
-    kd: Optional[KDLossConfig] = Field(default_factory=KDLossConfig)
+    kd: Optional[KDLossConfig] = None
 
 class LoggingConfig(BaseModel):
     tensorboard_dir: str = Field('', description='path to save logs')
@@ -66,7 +66,7 @@ class CollateFnConfig(BaseModel, Instanceable):
 
 class DataConfig(BaseModel):
     train_dataset: DatasetConfig = Field(default_factory=DatasetConfig)
-    valid_dataset: Optional[DatasetConfig] = Field(default_factory=DatasetConfig)
+    valid_dataset: Optional[DatasetConfig] = None
     num_workers: int = Field(0, ge=0)
     pin_memory: bool = True
     collate_fn: Optional[CollateFnConfig] = None

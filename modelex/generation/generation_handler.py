@@ -10,18 +10,17 @@ from torchtune.generation import get_causal_mask_from_padding_mask, get_position
 from torchtune.generation._generation import sample, update_stop_tokens_tracker
 from torchtune.modules.peft import get_merged_lora_ckpt
 
-from modelex.models.llm import LLM
-from modelex.models.llm.config import LLMConfig
+from modelex.models import instantiate_model, load_config
 from modelex.utils import convert_hf_state_dict, exists, get_state_dict_from_safetensors, has_hf_keys
 
-def generate_next_token(model: LLM, input_pos: torch.Tensor, x: torch.Tensor, q: torch.Tensor, *,
+def generate_next_token(model, input_pos: torch.Tensor, x: torch.Tensor, q: torch.Tensor, *,
                         mask: Optional[torch.Tensor] = None, temperature: float = 1.0, top_k: Optional[int] = None,
                         ) -> Tuple[torch.Tensor, torch.Tensor]:
     logits = model(x, input_pos=input_pos, mask=mask)['logits']
     return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, q=q), logits,
 
 @torch.inference_mode()
-def generate(model: LLM, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0,
+def generate(model, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0,
              top_k: Optional[int] = None, stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None,
              ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -93,15 +92,15 @@ class ModelGenerationHandler:
     def __init__(self, path: str, device: Union[str, torch.device]):
         self.path = path
         self.device = torch.device(device) if isinstance(device, str) else device
-        self.cfg: Optional[LLMConfig] = None
+        self.cfg = None
         self.tokenizer: Optional[Tokenizer] = None
-        self.model: Optional[LLM] = None
+        self.model = None
 
     @property
     def prompt_format(self, ) -> str: return self.cfg.inference.chat_format if exists(self.cfg.inference) else ""
 
     def load_model(self, compiled: bool = False, ):
-        self.cfg = LLMConfig.load_config(os.path.join(self.path, 'config.yaml'))
+        self.cfg = load_config(os.path.join(self.path, 'config.yaml'))
         tokenizer_path = os.path.join(self.path, 'tokenizer.json')
         self.tokenizer = None
         if os.path.exists(tokenizer_path):
@@ -117,7 +116,7 @@ class ModelGenerationHandler:
         peft = self.cfg.peft
         self.cfg.peft = None
 
-        model = LLM(self.cfg).bfloat16()
+        model = instantiate_model(self.cfg).bfloat16()
         model.load_state_dict(model_sd, strict=False, assign=True)  # converts the keys to suit the models
 
         if adaptor_sd: model_sd = get_merged_lora_ckpt(model.state_dict() | adaptor_sd, rank=peft.rank, alpha=peft.alpha)

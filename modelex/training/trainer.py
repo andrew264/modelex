@@ -17,7 +17,6 @@ from torchtune.utils import batch_to_device
 from tqdm import tqdm
 
 from modelex.models.gguf_model import GGUFModelLogits
-from modelex.models.llm import LLM
 from modelex.training.trainer_config import TrainerConfig
 from modelex.utils import exists, model_summary
 
@@ -31,7 +30,7 @@ class LogPrefix(enum.StrEnum):
     VALIDATION = 'valid/'
 
 class Trainer:  # to new beginnings ig
-    def __init__(self, model: LLM, config: Union[TrainerConfig, str]):
+    def __init__(self, model, config: Union[TrainerConfig, str]):
         if isinstance(config, str):
             self.config = TrainerConfig.load_config(config)
         else:

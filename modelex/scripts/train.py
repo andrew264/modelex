@@ -7,7 +7,7 @@ from torchtune.modules.common_utils import _register_reparametrize_state_dict_ho
 from torchtune.modules.peft import get_adapter_params, set_trainable_params
 from torchtune.training import cleanup_before_training
 
-from modelex.models.llm import LLMConfig, LLM
+from modelex.models import load_config, instantiate_model
 from modelex.training import Trainer
 from modelex.utils import convert_hf_state_dict, get_state_dict_from_safetensors, has_hf_keys, save_as_safetensors
 
@@ -28,14 +28,14 @@ def remove_checkpoint_suffix(state_dict: dict) -> dict:
 
 def main(args) -> None:
     path: str = args.path
-    cfg = LLMConfig.from_yaml(os.path.join(path, 'config.yaml'))
+    cfg = load_config(os.path.join(path, 'config.yaml'))
     print('=' * 75)
     print("Path: ", path)
     print('=' * 75)
     model_files = [os.path.abspath(p) for p in glob.glob(os.path.join(path, 'model*.safetensors'))]
     model_sd = get_state_dict_from_safetensors(model_files)
 
-    model = LLM(cfg=cfg, ).bfloat16()
+    model = instantiate_model(cfg, ).bfloat16()
     if not model_sd: model.apply(model._init_weights)
 
     if cfg.peft and cfg.peft.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)

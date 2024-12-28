@@ -4,10 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from modelex.models.llm.config import LLMConfig
 
 class MLP(nn.Module):
-    def __init__(self, cfg: LLMConfig) -> None:
+    def __init__(self, cfg) -> None:
         super(MLP, self).__init__()
         self.act_fn = F.silu
         hidden = cfg.hidden_size

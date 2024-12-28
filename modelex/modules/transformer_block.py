@@ -4,12 +4,11 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from modelex.models.llm.config import LLMConfig
 from modelex.modules.attention import Attention
 from modelex.modules.mlp import MLP
 
 class Block(nn.Module):
-    def __init__(self, cfg: LLMConfig, layer_idx: int,) -> None:
+    def __init__(self, cfg, layer_idx: int,) -> None:
         super().__init__()
         self.attn = Attention(cfg, layer_idx=layer_idx,)
         self.mlp = MLP(cfg, )

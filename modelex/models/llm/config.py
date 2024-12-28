@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class InferenceConfig(BaseModel):
     bos_token: int = 1
-    eos_tokens: List[int] = Field([2])
+    eos_tokens: List[int] = Field(default_factory=list)
     pad_token: int = 0
 
     precision: Literal['bf16', 'fp16', 'fp32'] = 'bf16'
@@ -24,6 +24,7 @@ class PeftConfig(BaseModel):
     quant_base: bool = False
 
 class LLMConfig(BaseModel):
+    type: str = "LLM"
     num_layers: int = 16
     max_seq_len: int = 4096
     vocab_size: int = 32000

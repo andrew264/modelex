@@ -28,7 +28,7 @@ def main():
         sys.exit(1)
     except Exception as e:
         print(f"Error running {args.subcommand}: {e}")
-        sys.exit(1)
+        raise e
 
 if __name__ == '__main__':
     main()
