@@ -4,15 +4,15 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.models.llm.config import LLMConfig
 from modelex.modules.attention import Attention
 from modelex.modules.mlp import MLP
 
 class Block(nn.Module):
-    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None, ) -> None:
+    def __init__(self, cfg: LLMConfig, layer_idx: int,) -> None:
         super().__init__()
-        self.attn = Attention(cfg, layer_idx=layer_idx, peft_cfg=peft_cfg)
-        self.mlp = MLP(cfg, peft_cfg=peft_cfg, )
+        self.attn = Attention(cfg, layer_idx=layer_idx,)
+        self.mlp = MLP(cfg, )
         self.sa_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
         self.mlp_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
     def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None, ):

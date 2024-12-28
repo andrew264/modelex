@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torchtune.modules import KVCache
 
-from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.models.llm.config import LLMConfig
 from modelex.utils import exists
 
 def rotate_half(x: Tensor) -> Tensor:
@@ -21,7 +21,7 @@ def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsquee
     return q_embed, k_embed
 
 class Attention(nn.Module):
-    def __init__(self, cfg: ModelCfg, layer_idx: int, peft_cfg: Optional[PeftCfg] = None):
+    def __init__(self, cfg: LLMConfig, layer_idx: int,):
         super(Attention, self).__init__()
         self.cfg = cfg
         self.layer_idx = layer_idx
@@ -34,18 +34,18 @@ class Attention(nn.Module):
         qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
 
         hidden = cfg.hidden_size
-        if peft_cfg:
-            if peft_cfg.type == 'dora':
+        if cfg.peft:
+            if cfg.peft.type == 'dora':
                 from torchtune.modules.peft import DoRALinear as Linear
             else:
                 from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
+            Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout, quantize_base=cfg.peft.quant_base)
 
-            if 'qkv_proj' in peft_cfg.layers:
+            if 'qkv_proj' in cfg.peft.layers:
                 self.qkv_proj = Linear(in_dim=hidden, out_dim=qkv_out_dim, use_bias=cfg.attn_qkv_bias)
             else:
                 self.qkv_proj = nn.Linear(hidden, qkv_out_dim, bias=cfg.attn_qkv_bias)
-            if 'o_proj' in peft_cfg.layers:
+            if 'o_proj' in cfg.peft.layers:
                 self.o_proj = Linear(in_dim=hidden, out_dim=hidden, use_bias=cfg.attn_out_bias)
             else:
                 self.o_proj = nn.Linear(hidden, hidden, bias=cfg.attn_out_bias)

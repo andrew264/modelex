@@ -3,10 +3,10 @@ from typing import Tuple
 import torch
 from torch import nn
 
-from modelex.models.llm.config import ModelCfg
+from modelex.models.llm.config import LLMConfig
 
 class RotaryEmbedding(nn.Module):
-    def __init__(self, cfg: ModelCfg):
+    def __init__(self, cfg: LLMConfig):
         super().__init__()
         self.dim = cfg.head_dim
         self.base = cfg.rope_base

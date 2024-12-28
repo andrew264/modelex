@@ -13,24 +13,23 @@ class Instanceable:
         return getattr(module, class_name)
 
 class OptimizerConfig(BaseModel, Instanceable):
-    class_path: str = Field(..., description="Path to optimizer class e.g. 'torch.optim.AdamW'")
+    class_path: str = Field(default='torch.optim.AdamW', description='Path to optimizer class e.g. \'torch.optim.AdamW\'')
     # optimizer_in_bwd: bool = False
     cpu_offload: bool = False
     params: Dict = Field(default_factory=dict)
 
 class SchedulerConfig(BaseModel, Instanceable):
-    class_path: str = Field(..., description="Path to scheduler class")
+    class_path: str = Field('', description='Path to scheduler class')
     warmup_ratio: float = Field(0.1, ge=0.0, le=1.0)
     params: Dict = Field(default_factory=dict)
 
 class KDLossConfig(BaseModel):
-    gguf_path: str = Field(..., description="Path to .gguf models")
+    gguf_path: str = Field('', description='Path to .gguf models')
     teacher_device: str = Field('cuda', description='teacher models device')
     kll_loss_ratio: float = Field(.5, gt=0., le=1., description='KD Loss Ratio')
 
 class LossConfig(BaseModel):
     num_output_chunks: int = Field(1, gt=0)
-    cpu_offload: bool = False
 
 class GradClipConfig(BaseModel):
     enabled: bool = False
@@ -38,44 +37,44 @@ class GradClipConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     compile: bool = False
-    epochs: int = Field(..., gt=0)
-    batch_size: int = Field(..., gt=0)
+    epochs: int = Field(1, gt=0)
+    batch_size: int = Field(1, gt=0)
     gradient_accumulation_steps: int = Field(1, gt=0)
     offload_activations: bool = False
     offload_embeddings: bool = False
     device: str = Field('cuda', description='training device')
     checkpointing_layers: List[str] = Field(default_factory=list, description='List of layer names to apply gradient checkpointing')
     grad_clip: GradClipConfig = Field(default_factory=GradClipConfig)
-    optimizer: OptimizerConfig
-    scheduler: Optional[SchedulerConfig] = None
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
+    scheduler: Optional[SchedulerConfig] = Field(default_factory=SchedulerConfig)
     loss: LossConfig = Field(default_factory=LossConfig)
-    kd: Optional[KDLossConfig] = None
+    kd: Optional[KDLossConfig] = Field(default_factory=KDLossConfig)
 
 class LoggingConfig(BaseModel):
-    tensorboard_dir: str
+    tensorboard_dir: str = Field('', description='path to save logs')
     log_frequency: int = Field(1, gt=0)
     save_frequency: int = Field(1, gt=0)
 
 class DatasetConfig(BaseModel, Instanceable):
-    class_path: str = Field(...)
+    class_path: str = Field('', description='Class path for dataset')
     max_steps: Optional[int] = Field(None, gt=0)
     params: Dict = Field(default_factory=dict)
 
 class CollateFnConfig(BaseModel, Instanceable):
-    class_path: str = Field(...)
+    class_path: str = Field('', description='Class path for CollateFN')
     params: Dict = Field(default_factory=dict)
 
 class DataConfig(BaseModel):
-    train_dataset: DatasetConfig
-    valid_dataset: Optional[DatasetConfig] = None
+    train_dataset: DatasetConfig = Field(default_factory=DatasetConfig)
+    valid_dataset: Optional[DatasetConfig] = Field(default_factory=DatasetConfig)
     num_workers: int = Field(0, ge=0)
     pin_memory: bool = True
     collate_fn: Optional[CollateFnConfig] = None
 
 class TrainerConfig(BaseModel):
-    training: TrainingConfig
-    data: DataConfig
-    logging: Optional[LoggingConfig] = None
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    data: DataConfig = Field(default_factory=DataConfig)
+    logging: Optional[LoggingConfig] = Field(default_factory=LoggingConfig)
 
     def save_config(self, path: Union[str, Path]) -> None:
         with open(path, 'w', encoding='utf-8') as f:

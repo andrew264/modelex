@@ -1,25 +1,24 @@
 from functools import partial
-from typing import Optional
 
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.models.llm.config import LLMConfig
 
 class MLP(nn.Module):
-    def __init__(self, cfg: ModelCfg, peft_cfg: Optional[PeftCfg] = None) -> None:
+    def __init__(self, cfg: LLMConfig) -> None:
         super(MLP, self).__init__()
         self.act_fn = F.silu
         hidden = cfg.hidden_size
         intermediate = cfg.intermediate_size
         bias = cfg.mlp_bias
-        if peft_cfg:
-            if peft_cfg.type == 'dora':
+        if cfg.peft:
+            if cfg.peft.type == 'dora':
                 from torchtune.modules.peft import DoRALinear as Linear
             else:
                 from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
+            Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout, quantize_base=cfg.peft.quant_base)
 
             self.w1 = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)
             self.w3 = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)

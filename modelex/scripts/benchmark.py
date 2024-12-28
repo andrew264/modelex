@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 from tabulate import tabulate
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from modelex.models.llm import LLM, ModelCfg
+from modelex.models.llm import LLM, LLMConfig
 from modelex.modules import Attention, Block, MLP
 
 ############################################################################################################
@@ -19,12 +19,7 @@ from modelex.modules import Attention, Block, MLP
 device = torch.device('cuda')
 dtype = torch.bfloat16
 torch.set_float32_matmul_precision('high')
-dummy_cfg = ModelCfg()
-dummy_cfg.hidden_size = 2560
-dummy_cfg.intermediate_size = 6912
-dummy_cfg.num_layers = 24
-dummy_cfg.num_kv_heads = 8
-dummy_cfg.max_seq_len = 4096
+dummy_cfg = LLMConfig(peft=None, hidden_size=2560, intermediate_size=6912, num_layers=24, num_kv_heads=8, max_seq_len=4096)
 batch_size = 1
 ############################################################################################################
 

@@ -6,36 +6,39 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 from torch import Tensor
+from torchtune.modules.loss import CEWithChunkedOutputLoss, ForwardKLLoss, ForwardKLWithChunkedOutputLoss
 
 from modelex.modules import Block, RotaryEmbedding, TiedLinear2
-from modelex.models.llm.config import ModelCfg, PeftCfg
+from modelex.models.llm.config import LLMConfig
 from modelex.utils import exists
 
 class LLM(nn.Module):
-    def __init__(self, cfg: Union[ModelCfg, dict, str], peft_cfg: Optional[PeftCfg] = None) -> None:
+    def __init__(self, cfg: Union[LLMConfig, dict, str],) -> None:
         super(LLM, self).__init__()
-        if isinstance(cfg, dict): cfg = ModelCfg(**cfg)
-        elif isinstance(cfg, str): cfg = ModelCfg.from_yaml(os.path.join(cfg, 'models.yaml'))
+        if isinstance(cfg, dict): cfg = LLMConfig(**cfg)
+        elif isinstance(cfg, str): cfg = LLMConfig.load_config(os.path.join(cfg, 'models.yaml'))
         self.cfg = cfg
 
-        self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.pad_token)
-        self.layers = nn.ModuleList([Block(cfg, idx, peft_cfg) for idx in range(cfg.num_layers)])
+        self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.inference.pad_token)
+        self.layers = nn.ModuleList([Block(cfg, idx) for idx in range(cfg.num_layers)])
         self.norm = nn.RMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
         self.rotary_emb = RotaryEmbedding(cfg)
 
         if not cfg.tie_word_embeddings:
-            if peft_cfg and 'output' in peft_cfg.layers:
-                if peft_cfg.type == 'dora':
+            if cfg.peft and 'output' in cfg.peft.layers:
+                if cfg.peft.type == 'dora':
                     from torchtune.modules.peft import DoRALinear as Linear
                 else:
                     from torchtune.modules.peft import LoRALinear as Linear
-                Linear = partial(Linear, rank=peft_cfg.rank, alpha=peft_cfg.alpha, dropout=peft_cfg.dropout, quantize_base=peft_cfg.quant_base)
+                Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout, quantize_base=cfg.peft.quant_base)
                 self.output = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
             else:
                 self.output = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
         else:
             self.output = TiedLinear2(self.tok_embeddings)
 
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.kd_loss_fn = ForwardKLLoss()
         self._cache_setup_complete = False
         self.num_output_chunks = 1
         self.offload_context = contextlib.nullcontext()
@@ -63,6 +66,8 @@ class LLM(nn.Module):
         return [self.output(chunk) for chunk in last_hidden_state.chunk(self.num_output_chunks, dim=1)]
     def set_output_chunks(self, chunks: int):
         self.num_output_chunks = chunks
+        self.loss_fn = CEWithChunkedOutputLoss(num_output_chunks=chunks)
+        self.kd_loss_fn = ForwardKLWithChunkedOutputLoss(num_output_chunks=chunks)
     def set_offload_context(self, ctx):
         self.offload_context = ctx
     def offload_embeddings(self, offload: bool = True):
@@ -72,8 +77,19 @@ class LLM(nn.Module):
         else:
             self._embedding_device = self.output.weight.device
         self.tok_embeddings = self.tok_embeddings.to(device=self._embedding_device)
-    def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, ) -> Union[Tensor, list[Tensor]]:
+    def calc_loss(self, logits: Union[Tensor, list[Tensor]], labels: Tensor) -> Tensor:
+        if isinstance(logits, Tensor):
+            return self.loss_fn(logits.contiguous().view(-1, self.cfg.vocab_size), labels.view(-1))
+        return self.loss_fn(logits, labels)
+    def calc_kd_loss(self, teacher_logits: Tensor, logits: Union[list[Tensor], Tensor], labels: Tensor) -> Tensor:
+        teacher_device = teacher_logits.device
+        if isinstance(logits, list): logits = [chunk.to(device=teacher_device) for chunk in logits]
+        else: logits = logits.to(device=teacher_device)
+        labels = labels.to(device=teacher_device)
+        return self.kd_loss_fn(logits, teacher_logits, labels)
+    def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, labels: Optional[Tensor] = None, teacher_logits: Optional[Tensor] = None, **kwargs) -> dict:
         device = input_ids.device
+        loss, kd_loss = None, None
         if input_ids.device != self._embedding_device:
             input_ids = input_ids.to(device=self._embedding_device)
         x = self.tok_embeddings(input_ids).to(device=device)
@@ -83,8 +99,9 @@ class LLM(nn.Module):
             for layer in self.layers:
                 x = layer(x=x, freqs=freqs, attn_mask=mask)
             x = self.norm(x)
-        if self.output.weight.device != x.device:
-            x = x.to(self.output.weight.device)
-        if self.num_output_chunks > 1:
-            return self.chunked_output(x)
-        return self.output(x)
+        if self.output.weight.device != x.device: x = x.to(self.output.weight.device)
+        if self.num_output_chunks > 1: logits = self.chunked_output(x)
+        else: logits = self.output(x)
+        if exists(labels): loss = self.calc_loss(logits, labels)
+        if exists(teacher_logits): kd_loss = self.calc_kd_loss(teacher_logits, logits, labels)
+        return dict(logits=logits, loss=loss, kd_loss=kd_loss)

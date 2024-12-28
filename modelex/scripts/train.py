@@ -7,7 +7,7 @@ from torchtune.modules.common_utils import _register_reparametrize_state_dict_ho
 from torchtune.modules.peft import get_adapter_params, set_trainable_params
 from torchtune.training import cleanup_before_training
 
-from modelex.models.llm import ModelCfg, PeftCfg, LLM
+from modelex.models.llm import LLMConfig, LLM
 from modelex.training import Trainer
 from modelex.utils import convert_hf_state_dict, get_state_dict_from_safetensors, has_hf_keys, save_as_safetensors
 
@@ -16,9 +16,9 @@ torch.set_float32_matmul_precision('high')
 parser = argparse.ArgumentParser(description="train model")
 parser.add_argument("path", type=str, help="Path to the model (required)")
 
-def setup_model_for_peft(model: torch.nn.Module, p_cfg: PeftCfg) -> None:
+def setup_model_for_peft(model: torch.nn.Module, cfg) -> None:
     set_trainable_params(model, get_adapter_params(model))
-    if p_cfg.type == 'dora':
+    if cfg.peft.type == 'dora':
         for m in model.modules():
             if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()  # i wish someone made documentation on this ffs
 
@@ -28,33 +28,29 @@ def remove_checkpoint_suffix(state_dict: dict) -> dict:
 
 def main(args) -> None:
     path: str = args.path
-    cfg = ModelCfg.from_yaml(os.path.join(path, 'model.yaml'))
-    if os.path.exists(os.path.join(path, 'peft.yaml')):
-        p_cfg = PeftCfg.from_yaml(os.path.join(path, 'peft.yaml'))
-    else: p_cfg = None
+    cfg = LLMConfig.from_yaml(os.path.join(path, 'config.yaml'))
     print('=' * 75)
     print("Path: ", path)
-    if p_cfg: print(p_cfg)
     print('=' * 75)
     model_files = [os.path.abspath(p) for p in glob.glob(os.path.join(path, 'model*.safetensors'))]
     model_sd = get_state_dict_from_safetensors(model_files)
 
-    model = LLM(cfg=cfg, peft_cfg=p_cfg, ).bfloat16()
+    model = LLM(cfg=cfg, ).bfloat16()
     if not model_sd: model.apply(model._init_weights)
 
-    if p_cfg and p_cfg.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)
+    if cfg.peft and cfg.peft.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)
     if model_sd:
         if has_hf_keys(model_sd): model_sd = convert_hf_state_dict(model_sd)
         _, unexpected = model.load_state_dict(model_sd, strict=False)
         print("Unexpected Keys: ", unexpected)
 
-    if p_cfg: setup_model_for_peft(model, p_cfg)
+    if cfg.peft: setup_model_for_peft(model, cfg)
 
     trainer = Trainer(model, os.path.join(path, 'trainer_config.yaml'))
     cleanup_before_training()
     trainer.train()
 
-    if p_cfg:
+    if cfg.peft:
         lora_params = remove_checkpoint_suffix(get_adapter_params(model))
         save_as_safetensors(lora_params, os.path.join(path, 'adaptor.safetensors'))
     else:

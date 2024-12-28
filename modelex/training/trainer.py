@@ -1,13 +1,12 @@
 import enum
 import importlib
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import torch
-from torch import nn, Tensor
+from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
@@ -42,8 +41,6 @@ class Trainer:  # to new beginnings ig
         # dummy
         self.optimizer: Optional[Optimizer] = None
         self.lr_scheduler: Optional[LambdaLR] = None
-        self.loss_fn = None
-        self.kd_loss_fn = None
         self.train_dataloader = None
         self.valid_dataloader = None
         self.device = None
@@ -115,19 +112,7 @@ class Trainer:  # to new beginnings ig
         ### CE Loss
         loss_config = self.config.training.loss
         if loss_config.num_output_chunks > 1:
-            from torchtune.modules.loss import CEWithChunkedOutputLoss
             self.model.set_output_chunks(loss_config.num_output_chunks)
-            self.loss_fn = CEWithChunkedOutputLoss(num_output_chunks=loss_config.num_output_chunks)
-        else:
-            self.loss_fn = nn.CrossEntropyLoss()
-        ### KD Loss
-        kd_config = self.config.training.kd
-        if exists(kd_config):
-            from torchtune.modules.loss import ForwardKLWithChunkedOutputLoss, ForwardKLLoss
-            if loss_config.num_output_chunks > 1:
-                self.kd_loss_fn = ForwardKLWithChunkedOutputLoss(num_output_chunks=loss_config.num_output_chunks)
-            else:
-                self.kd_loss_fn = ForwardKLLoss()
 
     def _setup_data(self):
         data = self.config.data
@@ -158,7 +143,7 @@ class Trainer:  # to new beginnings ig
         self.writer = SummaryWriter(str(log_dir))
 
     def _setup_misc(self):
-        self.ignore_labels_cache = torch.full((self.config.training.batch_size, 1), self.loss_fn.ignore_index, device=self.device)
+        self.ignore_labels_cache = torch.full((self.config.training.batch_size, 1), -100, device=self.device)
 
         ### Gradient Checkpointing
         if self.config.training.checkpointing_layers:
@@ -199,38 +184,12 @@ class Trainer:  # to new beginnings ig
     def steps_per_epoch(self):
         return self.items_per_epochs // (self.config.training.batch_size * self.config.training.gradient_accumulation_steps)
 
-    def _calc_ce_loss(self, logits: Union[List[Tensor], Tensor], labels: Tensor, prefix: LogPrefix) -> Tensor:
-        if self.config.training.loss.cpu_offload:
-            device = torch.device('cpu')
-            labels = labels.to(device=device)
-            if isinstance(logits, list):
-                logits = [chunk.to(device=device) for chunk in logits]
-            else:
-                logits = logits.to(device=device)
-
-        if self.config.training.loss.num_output_chunks > 1:
-            loss = self.loss_fn(logits, labels)
-        else:
-            loss = self.loss_fn(logits.contiguous().view(-1, self.model.cfg.vocab_size), labels.view(-1))
-        self.log(crossentropy_loss=loss.item(), prefix=prefix)
-        return loss
-
     def _get_teacher_logits(self, input_ids: Tensor) -> Optional[Union[List[Tensor], Tensor]]:
         if not exists(self.teacher_model): return None
         teacher_logits = self.teacher_model(input_ids).to(device=self.teacher_device)
         if self.config.training.loss.num_output_chunks > 1:
             teacher_logits = [chunk for chunk in teacher_logits.chunk(self.config.training.loss.num_output_chunks, dim=1)]
         return teacher_logits
-
-    def _calc_kl_loss(self, teacher_logits: Tensor, logits: Union[List[Tensor], Tensor], labels: Tensor, prefix: LogPrefix) -> Tensor:
-        if isinstance(logits, list):
-            logits = [chunk.to(device=self.teacher_device) for chunk in logits]
-        else:
-            logits = logits.to(device=self.teacher_device)
-        labels = labels.to(device=self.teacher_device)
-        kd_loss = self.kd_loss_fn(logits, teacher_logits, labels)
-        self.log(distillation_loss=kd_loss.item(), prefix=prefix)
-        return kd_loss.to(self.device)
 
     def _loss_step(self, batch: dict, prefix: LogPrefix = LogPrefix.TRAIN) -> Tensor:
         batch_to_device(batch, self.device)
@@ -240,21 +199,16 @@ class Trainer:  # to new beginnings ig
         labels = batch.get("labels")
         labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[:labels.shape[0]])).contiguous()
 
-        with ThreadPoolExecutor() as executor:
-            future_teacher_logits = executor.submit(self._get_teacher_logits, input_ids)
-            future_logits = executor.submit(self.model, input_ids=input_ids, input_pos=input_pos, mask=mask)
-
-            teacher_logits = future_teacher_logits.result()
-            logits = future_logits.result()
-
-        if not exists(self.teacher_model):
-            loss = self._calc_ce_loss(logits, labels, prefix)
-            return loss
-
-        ce_loss = self._calc_ce_loss(logits, labels, prefix)
-        kd_loss = self._calc_kl_loss(teacher_logits, logits, labels, prefix)
-        kll_loss_ratio = self.config.training.kd.kll_loss_ratio
-        loss = (1 - kll_loss_ratio) * ce_loss + kll_loss_ratio * kd_loss
+        teacher_logits = self._get_teacher_logits(input_ids)
+        output = self.model(input_ids=input_ids, input_pos=input_pos, mask=mask, labels=labels, teacher_logits=teacher_logits)
+        if not exists(teacher_logits):
+            loss = output.get('loss')
+            self.log(crossentropy_loss=loss.item(), prefix=prefix)
+        else:
+            ce_loss, kd_loss = output.get('loss'), output.get('kd_loss')
+            self.log(distillation_loss=kd_loss.item(), crossentropy_loss=ce_loss.item(), prefix=prefix)
+            kll_loss_ratio = self.config.training.kd.kll_loss_ratio
+            loss = (1 - kll_loss_ratio) * ce_loss + kll_loss_ratio * kd_loss
         return loss
 
     def _scheduler_step(self):
@@ -283,7 +237,7 @@ class Trainer:  # to new beginnings ig
             for idx, batch in enumerate(self.train_dataloader):
                 if exists(max_steps_per_epoch) and (idx // train_config.gradient_accumulation_steps) == max_steps_per_epoch:
                     break
-                current_num_tokens = (batch.get("labels") != self.loss_fn.ignore_index).sum()
+                current_num_tokens = (batch.get("labels") != -100).sum()
                 num_tokens += current_num_tokens
                 running_loss += self._loss_step(batch, prefix=log_prefix) * current_num_tokens
                 if (idx + 1) % train_config.gradient_accumulation_steps == 0:
