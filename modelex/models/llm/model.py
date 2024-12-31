@@ -43,6 +43,7 @@ class LLM(nn.Module):
         self.num_output_chunks = 1
         self.offload_context = contextlib.nullcontext()
         self._embedding_device = None
+        self.ignore_labels_cache = None
     def _init_weights(self, module):
         std = self.cfg.initializer_range
         if isinstance(module, nn.Linear):
@@ -102,6 +103,11 @@ class LLM(nn.Module):
         if self.output.weight.device != x.device: x = x.to(self.output.weight.device)
         if self.num_output_chunks > 1: logits = self.chunked_output(x)
         else: logits = self.output(x)
-        if exists(labels): loss = self.calc_loss(logits, labels)
+        if exists(labels):
+            if not exists(self.ignore_labels_cache):
+                batch_size = labels.size(0)
+                self.ignore_labels_cache = torch.full((batch_size, 1), -100, device=labels.device)
+            labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[:labels.shape[0]])).contiguous()
+            loss = self.calc_loss(logits, labels)
         if exists(teacher_logits): kd_loss = self.calc_kd_loss(teacher_logits, logits, labels)
         return dict(logits=logits, loss=loss, kd_loss=kd_loss)

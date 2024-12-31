@@ -12,7 +12,7 @@ class MLP(nn.Module):
         hidden = cfg.hidden_size
         intermediate = cfg.intermediate_size
         bias = cfg.mlp_bias
-        if cfg.peft:
+        if hasattr(cfg, 'peft') and cfg.peft:
             if cfg.peft.type == 'dora':
                 from torchtune.modules.peft import DoRALinear as Linear
             else:

@@ -38,19 +38,19 @@ def main(args) -> None:
     model = instantiate_model(cfg, ).bfloat16()
     if not model_sd: model.apply(model._init_weights)
 
-    if cfg.peft and cfg.peft.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)
+    if hasattr(cfg, 'peft') and cfg.peft and cfg.peft.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)
     if model_sd:
         if has_hf_keys(model_sd): model_sd = convert_hf_state_dict(model_sd)
         _, unexpected = model.load_state_dict(model_sd, strict=False)
         print("Unexpected Keys: ", unexpected)
 
-    if cfg.peft: setup_model_for_peft(model, cfg)
+    if hasattr(cfg, 'peft') and cfg.peft: setup_model_for_peft(model, cfg)
 
     trainer = Trainer(model, os.path.join(path, 'trainer_config.yaml'))
     cleanup_before_training()
     trainer.train()
 
-    if cfg.peft:
+    if hasattr(cfg, 'peft') and cfg.peft:
         lora_params = remove_checkpoint_suffix(get_adapter_params(model))
         save_as_safetensors(lora_params, os.path.join(path, 'adaptor.safetensors'))
     else:

@@ -142,7 +142,6 @@ class Trainer:  # to new beginnings ig
         self.writer = SummaryWriter(str(log_dir))
 
     def _setup_misc(self):
-        self.ignore_labels_cache = torch.full((self.config.training.batch_size, 1), -100, device=self.device)
 
         ### Gradient Checkpointing
         if self.config.training.checkpointing_layers:
@@ -196,7 +195,6 @@ class Trainer:  # to new beginnings ig
         input_pos = batch.get("input_pos")
         mask = batch.get("mask", None)
         labels = batch.get("labels")
-        labels = torch.hstack((labels[..., 1:], self.ignore_labels_cache[:labels.shape[0]])).contiguous()
 
         teacher_logits = self._get_teacher_logits(input_ids)
         output = self.model(input_ids=input_ids, input_pos=input_pos, mask=mask, labels=labels, teacher_logits=teacher_logits)
@@ -229,7 +227,7 @@ class Trainer:  # to new beginnings ig
         if exists(self.config.data.train_dataset.max_steps):
             max_steps_per_epoch = self.config.data.train_dataset.max_steps
         else:
-            max_steps_per_epoch = self.items_per_epochs
+            max_steps_per_epoch = self.steps_per_epoch
         log_prefix = LogPrefix.TRAIN
         for epoch_num in range(train_config.epochs):
             progress_bar = tqdm(total=self.steps_per_epoch)
