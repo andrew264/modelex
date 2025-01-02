@@ -48,6 +48,10 @@ def main(args) -> None:
 
     trainer = Trainer(model, os.path.join(path, 'trainer_config.yaml'))
     cleanup_before_training()
+    opt_sd_file = os.path.join(path, 'optimizer.pt')
+    if os.path.exists(opt_sd_file):
+        print('Found Optimizer state_dict')
+        trainer.set_opt_state_dict(torch.load(opt_sd_file, weights_only=True))
     trainer.train()
 
     if hasattr(cfg, 'peft') and cfg.peft:
@@ -55,6 +59,8 @@ def main(args) -> None:
         save_as_safetensors(lora_params, os.path.join(path, 'adaptor.safetensors'))
     else:
         save_as_safetensors(remove_checkpoint_suffix(model.state_dict()), os.path.join(path, 'model.safetensors'))
+    torch.save(trainer.get_opt_state_dict(), opt_sd_file)
+    print(f'Saved optimizer state_dict to {opt_sd_file}')
 
 if __name__ == "__main__":
     main(args=parser.parse_args())

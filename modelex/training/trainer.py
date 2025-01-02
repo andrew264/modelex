@@ -175,6 +175,14 @@ class Trainer:  # to new beginnings ig
         if self.config.logging.save_frequency % (step + 1) == 0:
             self.writer.flush()
 
+    def get_opt_state_dict(self):
+        assert self.optimizer is not None
+        return self.optimizer.state_dict()
+
+    def set_opt_state_dict(self, state_dict):
+        assert self.optimizer is not None
+        self.optimizer.load_state_dict(state_dict)
+
     @property
     def total_steps(self):
         return self.config.training.epochs * self.steps_per_epoch
