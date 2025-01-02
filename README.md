@@ -30,7 +30,7 @@ To train a model
 - First set up the config at `model_directory/trainer_config.yaml` see example [trainer_config.yaml](modelex/examples/trainer_config.yaml)
 - and run the following command
 ```bash
-modelex train model_directory/ train.parquet validate.parquet
+modelex train model_directory/
 ```
 
 ## Run Models
@@ -46,11 +46,10 @@ modelex train model_directory/ train.parquet validate.parquet
 Configuration files are stored as `.yaml` files in `model_directory/`:
 
 - `model.yaml`: Contains model hyperparameters.
-- `peft.yaml`: Contains performance-efficient fine-tuning (PEFT) configurations such as LoRA.
-- `inference.yaml`: Contains model generation parameters such as `chat_format`, `top_p`, `eos_tokens`, etc.
+- `trainer_config.yaml`: Contains training configurations such as optimizer, learning-rate, batch size.
 - `sysprompt.txt`: Stores the system prompt.
 
-Refer to `modelex/models/llm/config.py` for more details.
+Refer to `modelex/models/llm/config.py`, `modelex/training/trainer_config.py` for more details.
 
 ## History
 
