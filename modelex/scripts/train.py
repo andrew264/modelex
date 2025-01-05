@@ -1,26 +1,19 @@
 import argparse
+import gc
 import glob
 import os
 
 import torch
-from torchtune.modules.common_utils import _register_reparametrize_state_dict_hooks
-from torchtune.modules.peft import get_adapter_params, set_trainable_params
-from torchtune.training import cleanup_before_training
 
-from modelex.models import load_config, instantiate_model
-from modelex.training import Trainer
+from modelex.models import instantiate_model, load_config
+from modelex.training.trainer import Trainer
 from modelex.utils import convert_hf_state_dict, get_state_dict_from_safetensors, has_hf_keys, save_as_safetensors
+from modelex.utils.peft_utils import get_adapter_params, setup_model_for_peft
 
 torch.set_float32_matmul_precision('high')
 
 parser = argparse.ArgumentParser(description="train model")
 parser.add_argument("path", type=str, help="Path to the model (required)")
-
-def setup_model_for_peft(model: torch.nn.Module, cfg) -> None:
-    set_trainable_params(model, get_adapter_params(model))
-    if cfg.peft.type == 'dora':
-        for m in model.modules():
-            if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()  # i wish someone made documentation on this ffs
 
 def remove_checkpoint_suffix(state_dict: dict) -> dict:
     act_ckpt_wrapped_module = "._checkpoint_wrapped_module"
@@ -38,7 +31,6 @@ def main(args) -> None:
     model = instantiate_model(cfg, ).bfloat16()
     if not model_sd: model.apply(model._init_weights)
 
-    if hasattr(cfg, 'peft') and cfg.peft and cfg.peft.quant_base: _register_reparametrize_state_dict_hooks(model, dtype=model.tok_embeddings.weight.dtype)
     if model_sd:
         if has_hf_keys(model_sd): model_sd = convert_hf_state_dict(model_sd)
         _, unexpected = model.load_state_dict(model_sd, strict=False)
@@ -47,7 +39,9 @@ def main(args) -> None:
     if hasattr(cfg, 'peft') and cfg.peft: setup_model_for_peft(model, cfg)
 
     trainer = Trainer(model, os.path.join(path, 'trainer_config.yaml'))
-    cleanup_before_training()
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
     opt_sd_file = os.path.join(path, 'optimizer.pt')
     if os.path.exists(opt_sd_file):
         print('Found Optimizer state_dict')

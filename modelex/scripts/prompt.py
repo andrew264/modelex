@@ -4,7 +4,7 @@ import os
 
 import torch
 
-from modelex.datasets.prompt_format import PromptFormatter
+from modelex.data.prompt_format import PromptFormatter
 from modelex.generation import ModelGenerationHandler
 
 torch.set_float32_matmul_precision('high')

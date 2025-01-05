@@ -5,9 +5,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torchtune.modules import KVCache
 
 from modelex.utils import exists
+from modelex.utils.kv_cache import KVCache
 
 def rotate_half(x: Tensor) -> Tensor:
     return torch.cat((-x[..., x.shape[-1] // 2:], x[..., : x.shape[-1] // 2]), dim=-1)
@@ -20,7 +20,7 @@ def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsquee
     return q_embed, k_embed
 
 class Attention(nn.Module):
-    def __init__(self, cfg, layer_idx: int,):
+    def __init__(self, cfg, layer_idx: int, ):
         super(Attention, self).__init__()
         self.cfg = cfg
         self.layer_idx = layer_idx
@@ -90,7 +90,7 @@ class Attention(nn.Module):
         q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
         q, k = apply_rotary_pos_emb(q, k, *freqs)
 
-        if self.cache_enabled: k, v = self.kv_cache.update(k, v)
+        if self.cache_enabled: k, v = self.kv_cache(k, v)
 
         if self.num_kv_groups > 1:
             k = k.repeat_interleave(self.num_kv_groups, dim=1)

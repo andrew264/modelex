@@ -1,0 +1,117 @@
+from typing import List, Optional, Tuple
+
+import torch
+from torch import Tensor
+
+def get_causal_mask_from_padding_mask(padding_mask: Tensor, target_seq_len: Optional[int] = None) -> Tensor:
+    bsz, seq_len = padding_mask.shape
+    target_seq_len = seq_len if target_seq_len is None else target_seq_len
+    if target_seq_len < seq_len: raise AssertionError("target_seq_len cannot be shorter than the sequence length of the padding mask.")
+
+    mask = torch.tril(torch.ones(seq_len, target_seq_len, device=padding_mask.device, dtype=torch.bool), diagonal=0, ).repeat(bsz, 1, 1)
+    mask.narrow(2, 0, seq_len).mul_(padding_mask[:, None, :].expand(-1, seq_len, -1))
+    mask.diagonal(dim1=1, dim2=2).copy_(torch.tensor([True]))
+    return mask
+
+def get_position_ids_from_padding_mask(padding_mask: Tensor, ) -> Tensor:
+    return ((padding_mask.cumsum(-1) - 1) * padding_mask).to(torch.int)
+
+def update_stop_tokens_tracker(tokens: Tensor, stop_tokens: Tensor, stop_token_reached: Tensor) -> Tensor:
+    """Updates which sequences have reached a stop token."""
+    stop_token_reached_curr = torch.isin(tokens, stop_tokens).flatten()
+    stop_token_reached |= stop_token_reached_curr
+    return stop_token_reached
+
+def multinomial_sample_one(probs: Tensor, q: Tensor) -> Tensor:
+    """Samples from a multinomial distribution."""
+    return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
+
+def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = None, q: Optional[Tensor] = None, ) -> Tensor:
+    # scale the logits based on temperature
+    logits = logits / max(temperature, 1e-5)
+    if top_k is not None:
+        v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+        # select the very last value from the top_k above as the pivot
+        pivot = v.select(-1, -1).unsqueeze(-1)
+        # set everything smaller than pivot value to inf since these
+        # should be pruned
+        logits = torch.where(logits < pivot, -float("Inf"), logits)
+    # change logits into probabilities
+    probs = torch.nn.functional.softmax(logits, dim=-1)
+    # if q is None, we use the default softmax sampling trick
+    if q is None: q = torch.empty_like(probs).exponential_(1)
+
+    return multinomial_sample_one(probs, q)
+
+def generate_next_token(model, input_pos: Tensor, x: Tensor, q: Tensor, *, mask: Optional[Tensor] = None, temperature: float = 1.0,
+                        top_k: Optional[int] = None, ) -> Tuple[Tensor, Tensor]:
+    logits = model(x, input_pos=input_pos, mask=mask)['logits']
+    return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, q=q), logits,
+
+@torch.inference_mode()
+def generate(model, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
+             stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Generates tokens from a model conditioned on a prompt, and also returns logits for the generations.
+    """
+    prompt = prompt.view(1, -1) if prompt.ndim == 1 else prompt
+
+    bsz, prompt_length = prompt.size()
+    total_response_length = prompt_length + max_generated_tokens
+
+    generated_tokens = prompt.clone()
+    incremental_decoding = model.caches_are_enabled()
+
+    max_seq_len = (total_response_length if not incremental_decoding else model.decoder_max_cache_seq_len)
+    padding_masks = generated_tokens != pad_id
+
+    if not padding_masks.all():
+        padding_masks = torch.nn.functional.pad(padding_masks, (0, max_generated_tokens), value=True)
+        masks = get_causal_mask_from_padding_mask(padding_masks, target_seq_len=max_seq_len)
+        input_pos = get_position_ids_from_padding_mask(padding_masks)
+    else:
+        masks = torch.tril(torch.ones(total_response_length, max_seq_len, dtype=torch.bool, device=prompt.device, )).unsqueeze(0)
+        input_pos = torch.arange(0, total_response_length, device=generated_tokens.device).unsqueeze(0)
+
+    if incremental_decoding: curr_masks = masks[:, :prompt_length]
+    else: curr_masks = masks[:, :prompt_length, :prompt_length]
+
+    q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
+    tokens, generated_logits = generate_next_token(model, input_pos=input_pos[:, :prompt_length].squeeze(), mask=curr_masks, x=prompt,
+                                                   temperature=temperature, top_k=top_k, q=q, )
+    generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
+    curr_pos = prompt_length
+
+    stop_token_reached = torch.zeros(bsz, dtype=torch.bool, device=prompt.device)
+    stop_tokens = (torch.tensor(stop_tokens, device=prompt.device, dtype=tokens.dtype) if stop_tokens else None)
+    stop_token_mask = torch.ones((bsz, prompt_length + 1), dtype=torch.int32, device=prompt.device)
+
+    if stop_tokens is not None:
+        stop_token_reached = update_stop_tokens_tracker(tokens, stop_tokens, stop_token_reached)
+        if stop_token_reached.all().item(): return generated_tokens, generated_logits
+
+    for _ in range(max_generated_tokens - 1):
+        if stop_tokens is not None:
+            stop_token_mask = torch.cat([stop_token_mask, ~stop_token_reached.reshape(bsz, 1)], dim=-1)
+        if incremental_decoding:
+            curr_input_pos = input_pos[:, curr_pos]
+            curr_masks = masks[:, curr_pos, None, :]
+        else:
+            tokens = generated_tokens.clone()
+            curr_input_pos = input_pos[:, : curr_pos + 1]
+            curr_masks = masks[:, : curr_pos + 1, : curr_pos + 1]
+
+        q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
+        tokens, logits = generate_next_token(model, input_pos=curr_input_pos, x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, q=q, )
+        generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
+        curr_pos += 1
+        if incremental_decoding: generated_logits = torch.cat([generated_logits, logits], dim=1)
+        else: generated_logits = logits
+
+        if stop_tokens is not None:
+            stop_token_reached = update_stop_tokens_tracker(tokens, stop_tokens, stop_token_reached)
+            if stop_token_reached.all(): break
+    if stop_tokens is not None:
+        generated_tokens *= stop_token_mask
+        generated_logits *= stop_token_mask[:, :-1, None]
+    return generated_tokens, generated_logits

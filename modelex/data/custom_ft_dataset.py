@@ -2,8 +2,8 @@ from typing import Dict, List
 
 import numpy as np
 
-from modelex.datasets.chatlogs import Conversations
-from modelex.datasets.parquet import ParquetTextDataset
+from modelex.data.chatlogs import Conversations
+from modelex.data.parquet import ParquetTextDataset
 
 class CustomFTDataset:
     def __init__(self, conv_path: str, parquet_path: str, tokenizer_path: str, chat_format: str, enable_thoughts: str, num_epochs: int | str = 1,

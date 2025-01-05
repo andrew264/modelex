@@ -1,7 +1,6 @@
 import os
 from typing import Union
 
-import llama_cpp
 import torch
 from torch import Tensor
 
@@ -9,6 +8,11 @@ from modelex.utils.diskcache import tensor_cache
 
 class GGUFModelLogits:
     def __init__(self, name: str, n_ctx: int = 8192, device: str = 'cpu'):
+        try:
+            import llama_cpp
+        except ImportError as e:
+            print("Please install llama-cpp-python to use GGUFModelLogits!")
+            raise e
         n_gpu_layers = 0
         if device.startswith('cuda') or device == 'gpu':
             n_gpu_layers = -1

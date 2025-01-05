@@ -8,9 +8,9 @@ from modelex.modules.attention import Attention
 from modelex.modules.mlp import MLP
 
 class Block(nn.Module):
-    def __init__(self, cfg, layer_idx: int,) -> None:
+    def __init__(self, cfg, layer_idx: int, ) -> None:
         super().__init__()
-        self.attn = Attention(cfg, layer_idx=layer_idx,)
+        self.attn = Attention(cfg, layer_idx=layer_idx, )
         self.mlp = MLP(cfg, )
         self.sa_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
         self.mlp_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)

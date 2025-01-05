@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, TypedDict, Union
 import numpy as np
 from tokenizers import Tokenizer
 
-from modelex.datasets.prompt_format import ChatFormat, ChatFormatFactory, ChatFormatType
+from modelex.data.prompt_format import ChatFormat, ChatFormatFactory, ChatFormatType
 from modelex.utils import str2bool
 
 class Message(TypedDict):

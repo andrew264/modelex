@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-
 class MLP(nn.Module):
     def __init__(self, cfg) -> None:
         super(MLP, self).__init__()

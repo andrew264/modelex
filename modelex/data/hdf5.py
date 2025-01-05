@@ -1,9 +1,13 @@
-import h5py
 import torch
 from torch import Tensor
 
 class H5Dataset:
     def __init__(self, hdf5_path, ):
+        try:
+            import h5py
+        except ImportError as e:
+            print("Please install h5py to use H5Dataset")
+            raise e
         self.hdf5_file = h5py.File(hdf5_path, 'r')
         self.keys = list(self.hdf5_file.keys())
     def __len__(self): return len(self.keys)

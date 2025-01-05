@@ -7,12 +7,12 @@ data:
   num_workers: 4
   pin_memory: true
   train_dataset:
-    class_path: modelex.datasets.ParquetCustomDataReader
+    class_path: modelex.data.ParquetCustomDataReader
     max_steps: null
     params:
       path: /path/to/ft_train.parquet
   valid_dataset:
-    class_path: modelex.datasets.ParquetCustomDataReader
+    class_path: modelex.data.ParquetCustomDataReader
     max_steps: null
     params:
       path: /path/to/ft_valid.parquet
@@ -23,7 +23,7 @@ logging:
 training:
   batch_size: 1
   checkpointing_layers:
-  - modelex.modules.Block
+    - modelex.modules.Block
   device: cuda
   epochs: 4
   grad_clip:
@@ -45,10 +45,10 @@ training:
     params:
       fused: true
       betas:
-      - 0.9
-      - 0.95
+        - 0.9
+        - 0.95
       lr: 1.0e-05
       weight_decay: 0.1
   scheduler:
-    class_path: torchtune.modules.lr_schedulers.get_cosine_schedule_with_warmup
+    class_path: torchtune.training.lr_schedulers.get_cosine_schedule_with_warmup
     warmup_ratio: 0.1

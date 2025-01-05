@@ -17,16 +17,9 @@ dependencies = [
     "litserve",
     "torchtune",
     "tokenizers",
-    "pyarrow",
     "numpy",
-    "llama-cpp-python",
-    "seaborn",
-    "matplotlib",
-    "tabulate",
-    "torchao",
     "tqdm",
     "pydantic",
-    "h5py",
 ]
 
 [project.urls]

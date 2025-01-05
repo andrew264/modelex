@@ -1,3 +1,4 @@
+import re
 from typing import Dict
 
 from torch import Tensor
@@ -17,8 +18,24 @@ HF_KEY_MAPPING: Dict[str, str] = {
     "lm_head.weight": "output.weight",
 }
 
+def get_mapped_key(key: str, mapping_dict: Dict[str, str]) -> str:
+    try:
+        # Checks if there is a layer # in the key
+        if any(k.isdigit() for k in key.split(".")):
+            # Replace layer number with "{}" to create key for lookup
+            abstract_key = re.sub(r"(\.\d+)", ".{}", key)
+            layer_num = re.search(r"\d+", key).group(0)
+            new_key = mapping_dict[abstract_key]
+            new_key = new_key.format(layer_num)
+        else:
+            new_key = mapping_dict[key]
+    except KeyError as e:
+        raise KeyError(f'Error converting the state dict. Found unexpected key: "{key}". '
+                       "Please make sure you're loading a checkpoint with the right format. ") from e
+
+    return new_key
+
 def convert_hf_state_dict(state_dict: Dict) -> Dict[str, Tensor]:
-    from torchtune.models.convert_weights import get_mapped_key
     converted_state_dict = {}
     for k, v in state_dict.items():
         new_k = get_mapped_key(k, HF_KEY_MAPPING)

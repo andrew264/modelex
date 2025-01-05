@@ -6,14 +6,13 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torchtune.modules.loss import CEWithChunkedOutputLoss, ForwardKLLoss, ForwardKLWithChunkedOutputLoss
 
-from modelex.modules import Block, RotaryEmbedding, TiedLinear2
 from modelex.models.llm.config import LLMConfig
+from modelex.modules import Block, RotaryEmbedding, TiedLinear
 from modelex.utils import exists
 
 class LLM(nn.Module):
-    def __init__(self, cfg: Union[LLMConfig, dict, str],) -> None:
+    def __init__(self, cfg: Union[LLMConfig, dict, str], ) -> None:
         super(LLM, self).__init__()
         if isinstance(cfg, dict): cfg = LLMConfig(**cfg)
         elif isinstance(cfg, str): cfg = LLMConfig.load_config(os.path.join(cfg, 'models.yaml'))
@@ -35,10 +34,9 @@ class LLM(nn.Module):
             else:
                 self.output = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
         else:
-            self.output = TiedLinear2(self.tok_embeddings)
+            self.output = TiedLinear(self.tok_embeddings)
 
         self.loss_fn = nn.CrossEntropyLoss()
-        self.kd_loss_fn = ForwardKLLoss()
         self._cache_setup_complete = False
         self.num_output_chunks = 1
         self.offload_context = contextlib.nullcontext()
@@ -66,9 +64,14 @@ class LLM(nn.Module):
     def chunked_output(self, last_hidden_state: Tensor) -> list[Tensor]:
         return [self.output(chunk) for chunk in last_hidden_state.chunk(self.num_output_chunks, dim=1)]
     def set_output_chunks(self, chunks: int):
-        self.num_output_chunks = chunks
-        self.loss_fn = CEWithChunkedOutputLoss(num_output_chunks=chunks)
-        self.kd_loss_fn = ForwardKLWithChunkedOutputLoss(num_output_chunks=chunks)
+        try:
+            from torchtune.modules.loss import CEWithChunkedOutputLoss, ForwardKLWithChunkedOutputLoss
+            self.num_output_chunks = chunks
+            self.loss_fn = CEWithChunkedOutputLoss(num_output_chunks=chunks)
+            self.kd_loss_fn = ForwardKLWithChunkedOutputLoss(num_output_chunks=chunks)
+        except ImportError as e:
+            print("Please install torchtune to set output_chunks!")
+
     def set_offload_context(self, ctx):
         self.offload_context = ctx
     def offload_embeddings(self, offload: bool = True):
@@ -87,8 +90,15 @@ class LLM(nn.Module):
         if isinstance(logits, list): logits = [chunk.to(device=teacher_device) for chunk in logits]
         else: logits = logits.to(device=teacher_device)
         labels = labels.to(device=teacher_device)
-        return self.kd_loss_fn(logits, teacher_logits, labels)
-    def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, labels: Optional[Tensor] = None, teacher_logits: Optional[Tensor] = None, **kwargs) -> dict:
+        try:
+            from torchtune.modules.loss import ForwardKLLoss
+        except ImportError as e:
+            print("Please install torchtune to do knowledge distillation!")
+            raise e
+        kd_loss_fn = ForwardKLLoss()
+        return kd_loss_fn(logits, teacher_logits, labels)
+    def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, labels: Optional[Tensor] = None,
+                teacher_logits: Optional[Tensor] = None, **kwargs) -> dict:
         device = input_ids.device
         loss, kd_loss = None, None
         if input_ids.device != self._embedding_device:

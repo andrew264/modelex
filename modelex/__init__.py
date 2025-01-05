@@ -1,6 +1,6 @@
+import argparse
 import importlib
 import sys
-import argparse
 
 def main():
     # top-level parser

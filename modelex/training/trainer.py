@@ -11,8 +11,8 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchtune.modules import get_cosine_schedule_with_warmup
 from torchtune.training import get_memory_stats, OffloadActivations, set_activation_checkpointing
+from torchtune.training.lr_schedulers import get_cosine_schedule_with_warmup
 from torchtune.utils import batch_to_device
 from tqdm import tqdm
 
@@ -84,7 +84,13 @@ class Trainer:  # to new beginnings ig
         opt_class = opt_config.get_instance()
         params_to_optimize = filter(lambda p: p.requires_grad, self.model.parameters())
         if opt_config.cpu_offload:
-            from torchao.prototype.low_bit_optim import CPUOffloadOptimizer
+            try:
+                from torchao.prototype.low_bit_optim import CPUOffloadOptimizer
+            except ImportError:
+                print("Please install torchao to use cpu_offload!, disabling cpu_offload")
+                opt_config.cpu_offload = False
+                self.optimizer = opt_class(params_to_optimize, **opt_config.params)
+                return
             offload_grad = True if self.config.training.gradient_accumulation_steps == 1 else False
             self.optimizer = CPUOffloadOptimizer(params_to_optimize, opt_class, offload_gradients=offload_grad, **opt_config.params)
         else:
@@ -142,7 +148,6 @@ class Trainer:  # to new beginnings ig
         self.writer = SummaryWriter(str(log_dir))
 
     def _setup_misc(self):
-
         ### Gradient Checkpointing
         if self.config.training.checkpointing_layers:
             checkpointing_layers = {get_instance(l) for l in self.config.training.checkpointing_layers}

@@ -1,5 +1,11 @@
 # ModeLex
 
+## Install
+
+```bash
+pip install git+https://github.com/andrew264/modelex.git
+```
+
 ## Create Tokenized Dataset
 
 To tokenize and save the dataset into a Parquet file, run:
@@ -8,7 +14,7 @@ To tokenize and save the dataset into a Parquet file, run:
 modelex prepare_dataset --file {outputfile.parquet} --datasets classname:arg1,arg2
 ```
 
-### Example Class: `modelex.datasets.Conversation`
+### Example Class: `modelex.data.Conversation`
 
 This class accepts the following arguments:
 
