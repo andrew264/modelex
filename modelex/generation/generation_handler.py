@@ -25,10 +25,9 @@ class ModelGenerationHandler:
 
     def load_model(self, compiled: bool = False, ):
         self.cfg = load_config(os.path.join(self.path, 'config.yaml'))
-        tokenizer_path = os.path.join(self.path, 'tokenizer.json')
         self.tokenizer = None
-        if os.path.exists(tokenizer_path):
-            self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
+        if self.cfg.inference.tokenizer is not None:
+            self.tokenizer = self.cfg.inference.tokenizer.get_instance()
 
         adaptor_sd = {}
         model_files = [os.path.abspath(path) for path in glob.glob(os.path.join(self.path, 'model*.safetensors'))]
