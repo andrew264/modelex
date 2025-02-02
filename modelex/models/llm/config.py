@@ -1,20 +1,8 @@
-import importlib
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Self, Union
+from typing import List, Literal, Optional, Self, Union
 
 import yaml
 from pydantic import BaseModel, Field
-
-
-class TokenizerConfig(BaseModel):
-    class_path: str
-    params: Dict = Field(default_factory=dict)
-    def get_instance(self):
-        module_name, class_path = self.class_path.split('.', 1)
-        module = importlib.import_module(module_name)
-        for c in class_path.split('.'):
-            module = getattr(module, c)
-        return module(**self.params)
 
 class InferenceConfig(BaseModel):
     bos_token: int = 1
@@ -26,7 +14,6 @@ class InferenceConfig(BaseModel):
 
     top_k: int = Field(12, ge=1)
     temperature: float = Field(1.0, ge=0.0)
-    tokenizer: TokenizerConfig =  Field(default_factory=TokenizerConfig)
 
 class PeftConfig(BaseModel):
     type: Literal['lora', 'dora'] = 'lora'

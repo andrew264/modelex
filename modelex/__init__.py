@@ -23,8 +23,8 @@ def main():
         else:
             module.main()
 
-    except ImportError:
-        print(f"Error: {args.subcommand} not found")
+    except ImportError as e:
+        print(f"Error: {args.subcommand} not found", e)
         sys.exit(1)
     except Exception as e:
         print(f"Error running {args.subcommand}: {e}")
