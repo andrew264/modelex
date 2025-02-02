@@ -44,7 +44,7 @@ class LLMConfig(BaseModel):
     mlp_bias: bool = False
 
     inference: Optional[InferenceConfig] = Field(default_factory=InferenceConfig)
-    peft: Optional[PeftConfig] = Field(default_factory=PeftConfig)
+    peft: Optional[PeftConfig] = None
 
     @property
     def head_dim(self) -> int:

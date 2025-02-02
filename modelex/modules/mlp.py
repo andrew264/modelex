@@ -16,7 +16,7 @@ class MLP(nn.Module):
                 from torchtune.modules.peft import DoRALinear as Linear
             else:
                 from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout, quantize_base=cfg.peft.quant_base)
+            Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout)
 
             self.w1 = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)
             self.w3 = Linear(in_dim=hidden, out_dim=intermediate, use_bias=bias)

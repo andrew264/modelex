@@ -29,7 +29,7 @@ class LLM(nn.Module):
                     from torchtune.modules.peft import DoRALinear as Linear
                 else:
                     from torchtune.modules.peft import LoRALinear as Linear
-                Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout, quantize_base=cfg.peft.quant_base)
+                Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout)
                 self.output = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
             else:
                 self.output = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)

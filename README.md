@@ -44,7 +44,7 @@ modelex train model_directory/
 - To run the model in chat mode, use:
 
     ```bash
-    modelex prompt model_directory/
+    modelex chat model_directory/
     ```
 
 ## Configuration Files
