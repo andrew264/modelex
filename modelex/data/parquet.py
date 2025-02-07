@@ -2,16 +2,12 @@ import glob
 from typing import Dict, Iterator, List, Optional, Union
 
 import numpy as np
+import pyarrow.parquet as pq
 from tokenizers import Tokenizer
 from torch.utils.data import Dataset
 
 class ParquetCustomDataReader(Dataset):
     def __init__(self, path: str) -> None:
-        try:
-            import pyarrow.parquet as pq
-        except ImportError as e:
-            print("Please install pyarrow to use ParquetTextDataset!")
-            raise e
         self.pq_file = pq.ParquetFile(path)
     def __len__(self) -> int:
         return self.pq_file.num_row_groups
@@ -22,11 +18,6 @@ class ParquetCustomDataReader(Dataset):
 
 class ParquetTextDataset:
     def __init__(self, path: str, tokenizer_path: Optional[str] = None) -> None:
-        try:
-            import pyarrow.parquet as pq
-        except ImportError as e:
-            print("Please install pyarrow to use ParquetTextDataset!")
-            raise e
         self._tokenizer = Tokenizer.from_file(tokenizer_path) if tokenizer_path else None
         self.parquet_files = glob.glob(f"{path}/**/*.parquet", recursive=True)
         self.file_row_counts = []

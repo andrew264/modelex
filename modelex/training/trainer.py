@@ -57,7 +57,6 @@ class Trainer:  # to new beginnings ig
         self._setup_loss()
         self._setup_logger()
         self._setup_misc()
-        model_summary(self.model)
 
     def _setup_model(self):
         self.device = torch.device(self.config.training.device)
@@ -234,6 +233,7 @@ class Trainer:  # to new beginnings ig
 
     def train(self):
         train_config = self.config.training
+        model_summary(self.model)
         t0 = time.perf_counter()
         running_loss: Tensor = torch.tensor(0., device=self.device)
         num_tokens = 0
@@ -244,6 +244,7 @@ class Trainer:  # to new beginnings ig
         log_prefix = LogPrefix.TRAIN
         for epoch_num in range(train_config.epochs):
             progress_bar = tqdm(total=self.steps_per_epoch)
+            torch.cuda.empty_cache()
             for idx, batch in enumerate(self.train_dataloader):
                 if exists(max_steps_per_epoch) and (idx // train_config.gradient_accumulation_steps) == max_steps_per_epoch:
                     break

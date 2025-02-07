@@ -21,7 +21,8 @@ def model_summary(model: nn.Module):
     for param in model.parameters():
         num_params = param.numel()
         total_params += num_params
-        active_params += (param != 0).sum().item()
+        if param.requires_grad:
+            active_params += num_params
     inactive_params = total_params - active_params
 
     print(f"Total Parameters: {fmt(total_params)}")

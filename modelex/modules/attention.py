@@ -92,10 +92,6 @@ class Attention(nn.Module):
 
         if self.cache_enabled: k, v = self.kv_cache(k, v)
 
-        if self.num_kv_groups > 1:
-            k = k.repeat_interleave(self.num_kv_groups, dim=1)
-            v = v.repeat_interleave(self.num_kv_groups, dim=1)
-
-        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal)
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal, enable_gqa=self.num_kv_groups > 1)
         attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_size)
         return self.o_proj(attn)

@@ -2,6 +2,8 @@ import argparse
 import importlib
 from typing import Dict, List
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 from tqdm import tqdm
 
 def parse_class_args(s: str) -> Dict[str, List[str]]:
@@ -38,10 +40,4 @@ def main(args) -> None:
                 writer.write_table(table)
 
 if __name__ == '__main__':
-    try:
-        import pyarrow as pa
-        import pyarrow.parquet as pq
-    except ImportError as e:
-        print("Please install pyarrow to run prepare_dataset!")
-        raise e
     main(args=parser.parse_args())
