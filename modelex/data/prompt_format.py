@@ -2,8 +2,8 @@ from enum import StrEnum
 from typing import Dict, Self, Type, TypedDict
 
 class Message(TypedDict):
-    user: str
-    message: str
+    role: str
+    content: str
 
 class ChatFormat:
     BOT: str = ''  # Beginning of text token
@@ -72,13 +72,13 @@ class PromptFormatter(ChatFormat):
     def __str__(self) -> str:
         sysprompt = DEFAULT_SYSTEM_PROMPT
         msgs = self.msgs.copy()
-        if msgs[0]['user'] == 'system':
-            sysprompt = msgs.pop(0)['message']
+        if msgs[0]['role'] == 'system':
+            sysprompt = msgs.pop(0)['content']
         out = f'{self.BOT}{self.SH}system{self.EH}{sysprompt}{self.EOT}'
-        for m in msgs: out += f'{self.SH}{m["user"]}{self.EH}{m["message"]}{self.EOT}'
+        for m in msgs: out += f'{self.SH}{m["role"]}{self.EH}{m["content"]}{self.EOT}'
         return out
-    def add_msg(self, user: str, msg: str) -> Self:
-        self.msgs.append(Message(user=user, message=msg))
+    def add_msg(self, role: str, content: str) -> Self:
+        self.msgs.append(Message(role=role, content=content))
         return self
     def add_msgs(self, msgs: list[Message]) -> Self:
         self.msgs.extend(msgs)

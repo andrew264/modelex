@@ -14,7 +14,7 @@ To tokenize and save the dataset into a Parquet file, run:
 modelex prepare_dataset --file {outputfile.parquet} --datasets classname:arg1,arg2
 ```
 
-### Example Class: `modelex.data.Conversation`
+### Example Class: `modelex.data.Conversations`
 
 This class accepts the following arguments:
 
@@ -22,13 +22,15 @@ This class accepts the following arguments:
   
     ```json
     [
-        {"user": "username", "message": "message from user"},
-        {"user": "assistant", "message": "reply to user"},
+        {"role": "user", "content": "message from user"},
+        {"role": "assistant", "content": "reply to user"},
         ...
     ]
     ```
 
-- `tokenizer.json`: Path to the tokenizer configuration file.
+- `tokenizer_path`: Path to the tokenizer.json file.
+- `chat_format`: Chat format to use ["llama3", "gemma2", "chatml"]
+- `has_reasoning`: boolean value. weather to use reasoning tokens, must be in the JSON files with `reasoning` key
 
 ## Train Models
 
