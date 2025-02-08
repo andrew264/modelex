@@ -67,8 +67,8 @@ class ModelGenerationHandler:
 
         print(f'Compiled in {time.time() - start:.3f}s')
 
-    def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False)\
-            -> Tuple[Union[str, List[int]], int, int, float]:
+    def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False,
+                 skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
         self.model.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
@@ -95,5 +95,5 @@ class ModelGenerationHandler:
 
         if return_tokens: return out_tokens, len(out_tokens), total_tokens, generation_time
 
-        decoded = self.tokenizer.decode(out_tokens, skip_special_tokens=True)
+        decoded = self.tokenizer.decode(out_tokens, skip_special_tokens=skip_special_tokens)
         return decoded, len(out_tokens), total_tokens, generation_time

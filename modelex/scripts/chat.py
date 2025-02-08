@@ -45,7 +45,7 @@ def main(args):
             prompt.reset()
             continue
         prompt.add_msg(args.name, inp)
-        decoded, num_tokens, _, generation_time = model_handler.generate(prompt.get_prompt_for_completion())
+        decoded, num_tokens, _, generation_time = model_handler.generate(prompt.get_prompt_for_completion(), skip_special_tokens=False)
         prompt.add_msg(args.botname, decoded)
 
         print(f"{args.botname}: {decoded}")
