@@ -20,7 +20,7 @@ class PeftConfig(BaseModel):
     rank: int = Field(8, ge=1)
     alpha: int = Field(16, ge=1)
     dropout: float = Field(0.05, ge=0.0, le=1.0)
-    layers: List[str] = Field(['qkv_proj', 'o_proj', 'mlp', 'output'])
+    layers: List[str] = Field(['attn', 'mlp', 'output'])
 
 class LLMConfig(BaseModel):
     type: str = "LLM"

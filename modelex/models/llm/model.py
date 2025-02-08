@@ -1,6 +1,5 @@
 import contextlib
 import os
-from functools import partial
 from typing import Optional, Union
 
 import torch
@@ -8,7 +7,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from modelex.models.llm.config import LLMConfig
-from modelex.modules import Block, RotaryEmbedding, TiedLinear
+from modelex.modules import Block, linear_factory, RotaryEmbedding, TiedLinear
 from modelex.utils import exists
 
 class LLM(nn.Module):
@@ -24,15 +23,10 @@ class LLM(nn.Module):
         self.rotary_emb = RotaryEmbedding(cfg)
 
         if not cfg.tie_word_embeddings:
-            if cfg.peft and 'output' in cfg.peft.layers:
-                if cfg.peft.type == 'dora':
-                    from torchtune.modules.peft import DoRALinear as Linear
-                else:
-                    from torchtune.modules.peft import LoRALinear as Linear
-                Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout)
-                self.output = Linear(in_dim=cfg.hidden_size, out_dim=cfg.vocab_size, use_bias=False)
-            else:
-                self.output = nn.Linear(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False)
+            kwargs = {}
+            if hasattr(cfg, 'peft') and cfg.peft and 'output' in cfg.peft.layers:
+                kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout}
+            self.output = linear_factory(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False, **kwargs)
         else:
             self.output = TiedLinear(self.tok_embeddings)
 

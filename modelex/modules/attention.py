@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Optional, Tuple
 
 import torch
@@ -6,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from modelex.modules.linears import linear_factory
 from modelex.utils import exists
 from modelex.utils.kv_cache import KVCache
 
@@ -33,24 +33,12 @@ class Attention(nn.Module):
         qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
 
         hidden = cfg.hidden_size
-        if hasattr(cfg, 'peft') and cfg.peft:
-            if cfg.peft.type == 'dora':
-                from torchtune.modules.peft import DoRALinear as Linear
-            else:
-                from torchtune.modules.peft import LoRALinear as Linear
-            Linear = partial(Linear, rank=cfg.peft.rank, alpha=cfg.peft.alpha, dropout=cfg.peft.dropout)
+        kwargs = {}
+        if hasattr(cfg, 'peft') and cfg.peft and 'attn' in cfg.peft.layers:
+            kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout}
 
-            if 'qkv_proj' in cfg.peft.layers:
-                self.qkv_proj = Linear(in_dim=hidden, out_dim=qkv_out_dim, use_bias=cfg.attn_qkv_bias)
-            else:
-                self.qkv_proj = nn.Linear(hidden, qkv_out_dim, bias=cfg.attn_qkv_bias)
-            if 'o_proj' in cfg.peft.layers:
-                self.o_proj = Linear(in_dim=hidden, out_dim=hidden, use_bias=cfg.attn_out_bias)
-            else:
-                self.o_proj = nn.Linear(hidden, hidden, bias=cfg.attn_out_bias)
-        else:
-            self.qkv_proj = nn.Linear(hidden, qkv_out_dim, bias=cfg.attn_qkv_bias)
-            self.o_proj = nn.Linear(hidden, hidden, bias=cfg.attn_out_bias)
+        self.qkv_proj = linear_factory(in_features=hidden, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias, **kwargs)
+        self.o_proj = linear_factory(in_features=hidden, out_features=hidden, bias=cfg.attn_out_bias, **kwargs)
         self._register_load_state_dict_pre_hook(self.fused_qkv_hook)
 
         self.cache_enabled = False
