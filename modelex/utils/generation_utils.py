@@ -44,13 +44,13 @@ def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = N
     return multinomial_sample_one(probs, q)
 
 def generate_next_token(model, input_pos: Tensor, x: Tensor, q: Tensor, *, mask: Optional[Tensor] = None, temperature: float = 1.0,
-                        top_k: Optional[int] = None, ) -> Tuple[Tensor, Tensor]:
+                        top_k: Optional[int] = None, ) -> Tensor:
     logits = model(x, input_pos=input_pos, mask=mask)['logits']
-    return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, q=q), logits,
+    return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, q=q)
 
 @torch.inference_mode()
-def generate(model, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
-             stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Tuple[torch.Tensor, torch.Tensor]:
+def generate(model, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
+             stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Tensor:
     """
     Generates tokens from a model conditioned on a prompt, and also returns logits for the generations.
     """
@@ -77,7 +77,7 @@ def generate(model, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: 
     else: curr_masks = masks[:, :prompt_length, :prompt_length]
 
     q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
-    tokens, generated_logits = generate_next_token(model, input_pos=input_pos[:, :prompt_length].squeeze(), mask=curr_masks, x=prompt,
+    tokens = generate_next_token(model, input_pos=input_pos[:, :prompt_length].squeeze(), mask=curr_masks, x=prompt,
                                                    temperature=temperature, top_k=top_k, q=q, )
     generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
     curr_pos = prompt_length
@@ -88,7 +88,7 @@ def generate(model, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: 
 
     if stop_tokens is not None:
         stop_token_reached = update_stop_tokens_tracker(tokens, stop_tokens, stop_token_reached)
-        if stop_token_reached.all().item(): return generated_tokens, generated_logits
+        if stop_token_reached.all().item(): return generated_tokens
 
     for _ in range(max_generated_tokens - 1):
         if stop_tokens is not None:
@@ -102,16 +102,13 @@ def generate(model, prompt: torch.Tensor, *, max_generated_tokens: int, pad_id: 
             curr_masks = masks[:, : curr_pos + 1, : curr_pos + 1]
 
         q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
-        tokens, logits = generate_next_token(model, input_pos=curr_input_pos, x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, q=q, )
+        tokens = generate_next_token(model, input_pos=curr_input_pos, x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, q=q, )
         generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
         curr_pos += 1
-        if incremental_decoding: generated_logits = torch.cat([generated_logits, logits], dim=1)
-        else: generated_logits = logits
 
         if stop_tokens is not None:
             stop_token_reached = update_stop_tokens_tracker(tokens, stop_tokens, stop_token_reached)
             if stop_token_reached.all(): break
     if stop_tokens is not None:
         generated_tokens *= stop_token_mask
-        generated_logits *= stop_token_mask[:, :-1, None]
-    return generated_tokens, generated_logits
+    return generated_tokens

@@ -86,7 +86,7 @@ class ModelGenerationHandler:
         if min(max_new_tokens, self.model.cfg.max_seq_len - encoded_len) < max_new_tokens:
             tokens = tokens[:, -(self.model.cfg.max_seq_len - max_new_tokens):]
             encoded_len = tokens.size(1)
-        out, _ = generate(self.model, tokens, max_generated_tokens=max_new_tokens, pad_id=self.cfg.inference.pad_token,
+        out = generate(self.model, tokens, max_generated_tokens=max_new_tokens, pad_id=self.cfg.inference.pad_token,
                           temperature=self.cfg.inference.temperature, top_k=top_k, stop_tokens=self.cfg.inference.eos_tokens, )
         out = out[0].tolist()
         total_tokens = len(out)
