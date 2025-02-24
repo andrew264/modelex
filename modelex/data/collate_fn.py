@@ -25,7 +25,7 @@ def get_padded_ids_and_labels(batch: BatchType, pad_id: int, max_len: int) -> Tu
     ids, labels = [], []
     for item in batch:
         _id, label = item['input_ids'][:max_len], item['labels'][:max_len]
-        if isinstance(_id, np.ndarray):
+        if isinstance(_id, (np.ndarray, Tensor)):
             _id, label = _id.tolist(), label.tolist()
         ids.append(torch.tensor([pad_id] * (max_len - len(_id)) + _id))
         labels.append(torch.tensor([CROSS_ENTROPY_IGNORE_IDX] * (max_len - len(label)) + label))

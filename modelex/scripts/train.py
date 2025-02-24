@@ -5,8 +5,8 @@ import os
 
 import torch
 
-from modelex.models import instantiate_model, load_config
-from modelex.training.trainer import Trainer
+from modelex.models.registry import create_model
+from modelex.training.trainer import LLMTrainer
 from modelex.utils import convert_hf_state_dict, get_state_dict_from_safetensors, has_hf_keys, save_as_safetensors
 from modelex.utils.peft_utils import get_adapter_params, setup_model_for_peft
 
@@ -21,14 +21,14 @@ def remove_checkpoint_suffix(state_dict: dict) -> dict:
 
 def main(args) -> None:
     path: str = args.path
-    cfg = load_config(os.path.join(path, 'config.yaml'))
+    model = create_model(os.path.join(path, 'config.yaml'))
     print('=' * 75)
     print("Path: ", path)
     print('=' * 75)
     model_files = [os.path.abspath(p) for p in glob.glob(os.path.join(path, 'model*.safetensors'))]
     model_sd = get_state_dict_from_safetensors(model_files)
 
-    model = instantiate_model(cfg, ).bfloat16()
+    cfg = model.get_config()
     if not model_sd: model.apply(model._init_weights)
 
     if model_sd:
@@ -38,7 +38,7 @@ def main(args) -> None:
 
     if hasattr(cfg, 'peft') and cfg.peft: setup_model_for_peft(model, cfg)
 
-    trainer = Trainer(model, os.path.join(path, 'trainer_config.yaml'))
+    trainer = LLMTrainer(model, os.path.join(path, 'trainer_config.yaml'))
     gc.collect()
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()

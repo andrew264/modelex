@@ -3,6 +3,8 @@ from typing import List, Optional, Tuple
 import torch
 from torch import Tensor
 
+from modelex.models.base import BaseLLM
+
 def get_causal_mask_from_padding_mask(padding_mask: Tensor, target_seq_len: Optional[int] = None) -> Tensor:
     bsz, seq_len = padding_mask.shape
     target_seq_len = seq_len if target_seq_len is None else target_seq_len
@@ -45,11 +47,11 @@ def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = N
 
 def generate_next_token(model, input_pos: Tensor, x: Tensor, q: Tensor, *, mask: Optional[Tensor] = None, temperature: float = 1.0,
                         top_k: Optional[int] = None, ) -> Tensor:
-    logits = model(x, input_pos=input_pos, mask=mask)['logits']
+    logits = model(input_ids=x, input_pos=input_pos, mask=mask)
     return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, q=q)
 
 @torch.inference_mode()
-def generate(model, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
+def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
              stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Tensor:
     """
     Generates tokens from a model conditioned on a prompt, and also returns logits for the generations.

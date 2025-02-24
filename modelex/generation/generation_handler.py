@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 from tokenizers import Tokenizer
 
-from modelex.models import instantiate_model, load_config
+from modelex.models.registry import create_model
 from modelex.utils import convert_hf_state_dict, exists, get_state_dict_from_safetensors, has_hf_keys
 from modelex.utils.generation_utils import generate
 from modelex.utils.peft_utils import get_merged_lora_ckpt
@@ -24,11 +24,13 @@ class ModelGenerationHandler:
     def prompt_format(self, ) -> str: return self.cfg.inference.chat_format if exists(self.cfg.inference) else ""
 
     def load_model(self, compiled: bool = False, ):
-        self.cfg = load_config(os.path.join(self.path, 'config.yaml'))
         tokenizer_path = os.path.join(self.path, 'tokenizer.json')
         self.tokenizer = None
         if os.path.exists(tokenizer_path):
             self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
+
+        model = create_model(os.path.join(self.path, 'config.yaml'))
+        self.cfg = model.get_config()
 
         adaptor_sd = {}
         model_files = [os.path.abspath(path) for path in glob.glob(os.path.join(self.path, 'model*.safetensors'))]
@@ -40,7 +42,6 @@ class ModelGenerationHandler:
         peft = self.cfg.peft
         self.cfg.peft = None
 
-        model = instantiate_model(self.cfg)
         model.load_state_dict(model_sd, strict=False, assign=True)  # converts the keys to suit the models
 
         if adaptor_sd: model_sd = get_merged_lora_ckpt(model.state_dict() | adaptor_sd, rank=peft.rank, alpha=peft.alpha)

@@ -1,8 +1,8 @@
 import torch
 
 class RandomDataset:
-    def __init__(self, vocab_size: int, seq_len: int = 1024, num_codebooks: int = 0):
-        self.seq_len = seq_len
+    def __init__(self, vocab_size: int, max_len: int = 1024, num_codebooks: int = 0):
+        self.seq_len = max_len
         self.vocab_size = vocab_size
         self.num_codebooks = num_codebooks
     def __len__(self): return 1_000

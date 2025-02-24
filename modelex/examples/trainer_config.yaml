@@ -30,18 +30,8 @@ training:
     enabled: true
     max_norm: 1.0
   gradient_accumulation_steps: 4
-  kd:
-    gguf_path: /path/to/model.gguf
-    kll_loss_ratio: 0.3
-    teacher_device: cpu
-  loss:
-    cpu_offload: true
-    num_output_chunks: 16
-  offload_activations: false
-  offload_embeddings: true
   optimizer:
     class_path: torch.optim.AdamW
-    cpu_offload: false
     params:
       fused: true
       betas:

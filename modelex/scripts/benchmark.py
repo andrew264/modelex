@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 from modelex.models.llm.config import LLMConfig
-from modelex.models.llm.model import LLM
+from modelex.models.llm.llm import LLM
 from modelex.modules import Attention, Block, MLP
 
 ############################################################################################################

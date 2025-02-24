@@ -3,7 +3,7 @@ import importlib
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch import Tensor
@@ -11,12 +11,12 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchtune.training import get_memory_stats, OffloadActivations, set_activation_checkpointing
+from torchtune.training import get_memory_stats, set_activation_checkpointing
 from torchtune.training.lr_schedulers import get_cosine_schedule_with_warmup
 from torchtune.utils import batch_to_device
 from tqdm import tqdm
 
-from modelex.models.gguf_model import GGUFModelLogits
+from modelex.models.base import BaseLLM
 from modelex.training.trainer_config import TrainerConfig
 from modelex.utils import exists, model_summary
 
@@ -29,8 +29,8 @@ class LogPrefix(enum.StrEnum):
     TRAIN = 'train/'
     VALIDATION = 'valid/'
 
-class Trainer:  # to new beginnings ig
-    def __init__(self, model, config: Union[TrainerConfig, str]):
+class LLMTrainer:  # to new beginnings ig
+    def __init__(self, model: BaseLLM, config: Union[TrainerConfig, str]):
         if isinstance(config, str):
             self.config = TrainerConfig.load_config(config)
         else:
@@ -45,7 +45,6 @@ class Trainer:  # to new beginnings ig
         self.device = None
         self.global_steps: Dict[LogPrefix, int] = {p: 0 for p in LogPrefix}
         self.items_per_epochs = 0
-        self.teacher_model = None
 
         self._setup()
 
@@ -54,27 +53,12 @@ class Trainer:  # to new beginnings ig
         self._setup_data()
         self._setup_optimizer()
         self._setup_scheduler()
-        self._setup_loss()
         self._setup_logger()
         self._setup_misc()
 
     def _setup_model(self):
         self.device = torch.device(self.config.training.device)
-        model = self.model
-        if self.config.training.offload_embeddings:
-            model.tok_embeddings.to('cpu')
-            model.rotary_emb.to(device=self.device)
-            model.layers.to(device=self.device)
-            model.norm.to(device=self.device)
-            if not model.cfg.tie_word_embeddings:
-                model.output.to(device=self.device)
-        else:
-            model.to(device=self.device)
-
-        ### Offload Activations to CPU
-        if self.config.training.offload_activations:
-            model.set_offload_context(OffloadActivations(use_streams=True, max_fwd_stash_size=2))
-
+        self.model.to(device=self.device, dtype=torch.bfloat16)
         if self.config.training.compile:
             self.model.forward = torch.compile(self.model.forward, mode='max-autotune')
 
@@ -82,18 +66,8 @@ class Trainer:  # to new beginnings ig
         opt_config = self.config.training.optimizer
         opt_class = opt_config.get_instance()
         params_to_optimize = filter(lambda p: p.requires_grad, self.model.parameters())
-        if opt_config.cpu_offload:
-            try:
-                from torchao.prototype.low_bit_optim import CPUOffloadOptimizer
-            except ImportError:
-                print("Please install torchao to use cpu_offload!, disabling cpu_offload")
-                opt_config.cpu_offload = False
-                self.optimizer = opt_class(params_to_optimize, **opt_config.params)
-                return
-            offload_grad = True if self.config.training.gradient_accumulation_steps == 1 else False
-            self.optimizer = CPUOffloadOptimizer(params_to_optimize, opt_class, offload_gradients=offload_grad, **opt_config.params)
-        else:
-            self.optimizer = opt_class(params_to_optimize, **opt_config.params)
+
+        self.optimizer = opt_class(params_to_optimize, **opt_config.params)
 
     def _setup_scheduler(self):
         scheduler_config = self.config.training.scheduler
@@ -106,17 +80,7 @@ class Trainer:  # to new beginnings ig
             params |= dict(num_warmup_steps=num_warmup_steps, num_training_steps=self.total_steps)
 
         assert exists(self.optimizer), 'optimizer first please'
-        if self.config.training.optimizer.cpu_offload:
-            # dummy opt cuz CPUOffloadOptimizer doesnt inherit Optimizer
-            self.lr_scheduler = scheduler_class(torch.optim.AdamW({torch.tensor(0.)}), **params)
-        else:
-            self.lr_scheduler = scheduler_class(self.optimizer, **params)
-
-    def _setup_loss(self):
-        ### CE Loss
-        loss_config = self.config.training.loss
-        if loss_config.num_output_chunks > 1:
-            self.model.set_output_chunks(loss_config.num_output_chunks)
+        self.lr_scheduler = scheduler_class(self.optimizer, **params)
 
     def _setup_data(self):
         data = self.config.data
@@ -152,15 +116,6 @@ class Trainer:  # to new beginnings ig
             checkpointing_layers = {get_instance(l) for l in self.config.training.checkpointing_layers}
             set_activation_checkpointing(self.model, auto_wrap_policy=checkpointing_layers)
 
-        ### Offload Embeddings
-        if self.config.training.offload_embeddings:
-            self.model.offload_embeddings(self.config.training.offload_embeddings)
-
-        kd_config = self.config.training.kd
-        if exists(kd_config):
-            self.teacher_device = torch.device(kd_config.teacher_device)
-            self.teacher_model = GGUFModelLogits(kd_config.gguf_path, n_ctx=self.model.cfg.max_seq_len, device=kd_config.teacher_device)
-
     def log(self, prefix: LogPrefix, **kwargs: Union[float, torch.Tensor, Dict[str, float]]):
         if not exists(self.config.logging):
             return
@@ -194,13 +149,6 @@ class Trainer:  # to new beginnings ig
     def steps_per_epoch(self):
         return self.items_per_epochs // (self.config.training.batch_size * self.config.training.gradient_accumulation_steps)
 
-    def _get_teacher_logits(self, input_ids: Tensor) -> Optional[Union[List[Tensor], Tensor]]:
-        if not exists(self.teacher_model): return None
-        teacher_logits = self.teacher_model(input_ids).to(device=self.teacher_device)
-        if self.config.training.loss.num_output_chunks > 1:
-            teacher_logits = [chunk for chunk in teacher_logits.chunk(self.config.training.loss.num_output_chunks, dim=1)]
-        return teacher_logits
-
     def _loss_step(self, batch: dict, prefix: LogPrefix = LogPrefix.TRAIN) -> Tensor:
         batch_to_device(batch, self.device)
         input_ids = batch.get("input_ids")
@@ -208,28 +156,15 @@ class Trainer:  # to new beginnings ig
         mask = batch.get("mask", None)
         labels = batch.get("labels")
 
-        teacher_logits = self._get_teacher_logits(input_ids)
-        output = self.model(input_ids=input_ids, input_pos=input_pos, mask=mask, labels=labels, teacher_logits=teacher_logits)
-        if not exists(teacher_logits):
-            loss = output.get('loss')
-            self.log(crossentropy_loss=loss.item(), prefix=prefix)
-        else:
-            ce_loss, kd_loss = output.get('loss'), output.get('kd_loss')
-            self.log(distillation_loss=kd_loss.item(), crossentropy_loss=ce_loss.item(), prefix=prefix)
-            kll_loss_ratio = self.config.training.kd.kll_loss_ratio
-            loss = (1 - kll_loss_ratio) * ce_loss + kll_loss_ratio * kd_loss
+        output = self.model.train_step(input_ids=input_ids, input_pos=input_pos, mask=mask, labels=labels)
+        loss = output.get('loss')
+        self.log(crossentropy_loss=loss.item(), prefix=prefix)
+
         return loss
 
     def _scheduler_step(self):
         if exists(self.lr_scheduler):
             self.lr_scheduler.step()
-            if self.config.training.optimizer.cpu_offload:
-                lr = self.lr_scheduler.get_lr()[0]
-                for param_group in self.optimizer.param_groups:
-                    if isinstance(param_group["lr"], torch.Tensor):
-                        param_group["lr"].fill_(lr)
-                    else:
-                        param_group["lr"] = lr
 
     def train(self):
         train_config = self.config.training
@@ -297,7 +232,7 @@ class Trainer:  # to new beginnings ig
         for idx, batch in enumerate(self.valid_dataloader):
             if idx == max_steps:
                 break
-            current_num_tokens = (batch.get("labels") != self.loss_fn.ignore_index).sum()
+            current_num_tokens = (batch.get("labels") != -100).sum()
             with torch.no_grad():
                 loss = self._loss_step(batch, prefix=log_prefix)
             _loss = loss.item()

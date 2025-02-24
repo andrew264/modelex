@@ -24,7 +24,7 @@ def main():
             module.main()
 
     except ImportError as e:
-        print(f"Error: {args.subcommand} not found", e)
+        print(f"Error: {args.subcommand} not found\n", e)
         sys.exit(1)
     except Exception as e:
         print(f"Error running {args.subcommand}: {e}")
