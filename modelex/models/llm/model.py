@@ -106,7 +106,11 @@ class LLM(nn.Module):
             x = self.norm(x)
         if self.output.weight.device != x.device: x = x.to(self.output.weight.device)
         if self.num_output_chunks > 1: logits = self.chunked_output(x)
-        else: logits = self.output(x)
+        else:
+            if not self.training:
+                logits = self.output(x[:, -1:])
+            else:
+                logits = self.output(x)
         if exists(labels):
             if not exists(self.ignore_labels_cache):
                 batch_size = labels.size(0)
