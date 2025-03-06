@@ -67,5 +67,3 @@ class LLMConfig(BaseModel):
     def load_config(cls, path: Union[str, Path]) -> Self:
         with open(path, encoding='utf-8') as f:
             return cls(**yaml.safe_load(f))
-
-LLMTrainConfig = LLMConfig
