@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Type
 import yaml
 import importlib
@@ -17,7 +18,7 @@ def register_model(name: str):
         return cls
     return decorator
 
-def create_model(config_path: str) -> BaseLLM:
+def create_model(config_path: str | Path) -> BaseLLM:
     """
     Creates a model instance from a configuration file.
     """

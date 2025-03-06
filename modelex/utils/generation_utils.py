@@ -28,7 +28,7 @@ def multinomial_sample_one(probs: Tensor, q: Tensor) -> Tensor:
     """Samples from a multinomial distribution."""
     return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
 
-def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = None, q: Optional[Tensor] = None, ) -> Tensor:
+def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = None, top_p: Optional[float] = None, q: Optional[Tensor] = None, ) -> Tensor:
     # scale the logits based on temperature
     logits = logits / max(temperature, 1e-5)
     if top_k is not None:
@@ -38,6 +38,14 @@ def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = N
         # set everything smaller than pivot value to inf since these
         # should be pruned
         logits = torch.where(logits < pivot, -float("Inf"), logits)
+    if top_p is not None:
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
+        cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+        sorted_indices_to_remove = cumulative_probs <= (1 - top_p)
+        sorted_indices_to_remove[..., -1:] = 0
+        indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+        logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
     # change logits into probabilities
     probs = torch.nn.functional.softmax(logits, dim=-1)
     # if q is None, we use the default softmax sampling trick
@@ -46,12 +54,12 @@ def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = N
     return multinomial_sample_one(probs, q)
 
 def generate_next_token(model, input_pos: Tensor, x: Tensor, q: Tensor, *, mask: Optional[Tensor] = None, temperature: float = 1.0,
-                        top_k: Optional[int] = None, ) -> Tensor:
+                        top_k: Optional[int] = None, top_p: Optional[float] = None,) -> Tensor:
     logits = model(input_ids=x, input_pos=input_pos, mask=mask)
-    return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, q=q)
+    return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, top_p=top_p, q=q)
 
 @torch.inference_mode()
-def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
+def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None, top_p: Optional[float] = None,
              stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Tensor:
     """
     Generates tokens from a model conditioned on a prompt, and also returns logits for the generations.
@@ -80,7 +88,7 @@ def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_i
 
     q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
     tokens = generate_next_token(model, input_pos=input_pos[:, :prompt_length].squeeze(), mask=curr_masks, x=prompt,
-                                                   temperature=temperature, top_k=top_k, q=q, )
+                                                   temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
     generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
     curr_pos = prompt_length
 
@@ -104,7 +112,7 @@ def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_i
             curr_masks = masks[:, : curr_pos + 1, : curr_pos + 1]
 
         q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
-        tokens = generate_next_token(model, input_pos=curr_input_pos, x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, q=q, )
+        tokens = generate_next_token(model, input_pos=curr_input_pos, x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
         generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
         curr_pos += 1
 

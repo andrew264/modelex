@@ -17,7 +17,7 @@ def main(args):
         prompt = input("Enter a prompt: ")
         if prompt == '': break
         decoded, num_tokens, _, generation_time = model_handler.generate(prompt)
-        print(f"Assistant: {decoded}")
+        print(f"Model Output: {decoded}")
         print(f"Generated {num_tokens} tokens in {generation_time:.3f}s")
 
 if __name__ == '__main__':

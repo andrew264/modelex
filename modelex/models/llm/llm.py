@@ -44,19 +44,19 @@ class LLM(BaseLLM):
         for layer in self.layers: layer.reset_cache()
     def calc_loss(self, logits: Tensor, labels: Tensor) -> Tensor:
         return self.loss_fn(logits.contiguous().view(-1, self.cfg.vocab_size), labels.view(-1))
-    def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, **kwargs) -> Tensor:
+    def forward(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, labels: Optional[Tensor] = None, force_full_logits: bool = False, **kwargs) -> Tensor:
         x = self.tok_embeddings(input_ids)
         if input_pos is None: input_pos = torch.arange(x.shape[1], device=x.device).unsqueeze(0)
         freqs = self.rotary_emb(input_pos)
         for layer in self.layers:
             x = layer(x=x, freqs=freqs, attn_mask=mask)
         x = self.norm(x)
-        if not self.training: logits = self.output(x[:, -1:])
-        else: logits = self.output(x)
+        if self.training or exists(labels) or force_full_logits: logits = self.output(x)
+        else: logits = self.output(x[:, -1:])
         return logits
-    def train_step(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, labels: Optional[Tensor] = None, **kwargs) -> dict:
+    def train_step(self, input_ids: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None, labels: Optional[Tensor] = None, force_full_logits: bool = False, **kwargs) -> dict:
         loss = None
-        logits = self.forward(input_ids, input_pos, mask)
+        logits = self.forward(input_ids, input_pos, mask, labels, force_full_logits=force_full_logits)
         if exists(labels):
             if not exists(self.ignore_labels_cache):
                 batch_size = labels.size(0)

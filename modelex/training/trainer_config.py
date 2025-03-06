@@ -40,6 +40,8 @@ class LoggingConfig(BaseModel):
     tensorboard_dir: str = Field('', description='path to save logs')
     log_frequency: int = Field(1, gt=0)
     save_frequency: int = Field(1, gt=0)
+    save_checkpoint_per_epoch: bool = False
+    checkpoint_frequency: Optional[int] = None
 
 class DatasetConfig(BaseModel, Instanceable):
     class_path: str = Field('', description='Class path for dataset')

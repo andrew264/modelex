@@ -1,8 +1,7 @@
 import gc
-import glob
-import os
 import time
-from typing import List, Optional, Tuple, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from tokenizers import Tokenizer
@@ -13,68 +12,180 @@ from modelex.utils.generation_utils import generate
 from modelex.utils.peft_utils import get_merged_lora_ckpt
 
 class ModelGenerationHandler:
-    def __init__(self, path: str, device: Union[str, torch.device]):
-        self.path = path
+    """Handles loading and generation for ML models."""
+
+    def __init__(self, path: Union[str, Path], device: Union[str, torch.device]):
+        """
+        Initialize the model generation handler.
+
+        Args:
+            path: Path to the model directory containing model files and config
+            device: Device to load the model on (e.g., 'cuda', 'cpu')
+        """
+        self.path = Path(path)
         self.device = torch.device(device) if isinstance(device, str) else device
         self.cfg = None
         self.tokenizer: Optional[Tokenizer] = None
         self.model = None
+        self._is_compiled = False
 
     @property
-    def prompt_format(self, ) -> str: return self.cfg.inference.chat_format if exists(self.cfg.inference) else ""
+    def prompt_format(self) -> str:
+        """Get the chat format from the inference config."""
+        return self.cfg.inference.chat_format if hasattr(self.cfg, 'inference') and exists(self.cfg.inference) else ""
 
-    def load_model(self, compiled: bool = False, ):
-        tokenizer_path = os.path.join(self.path, 'tokenizer.json')
-        self.tokenizer = None
-        if os.path.exists(tokenizer_path):
-            self.tokenizer = Tokenizer.from_file(os.path.join(self.path, 'tokenizer.json'))
+    @property
+    def is_loaded(self) -> bool:
+        """Check if the model is loaded."""
+        return self.model is not None
 
-        model = create_model(os.path.join(self.path, 'config.yaml'))
+    def load_tokenizer(self) -> None:
+        """Load the tokenizer from the model path."""
+        tokenizer_path = self.path / 'tokenizer.json'
+        if tokenizer_path.exists():
+            self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        else:
+            raise FileNotFoundError(f"Tokenizer not found at {tokenizer_path}")
+
+    def load_model(self, compiled: bool = False) -> None:
+        """
+        Load the model from the specified path.
+
+        Args:
+            compiled: Whether to compile the model using torch.compile
+
+        Raises:
+            FileNotFoundError: If model files are not found
+        """
+        # Load tokenizer
+        if self.tokenizer is None:
+            try:
+                self.load_tokenizer()
+            except FileNotFoundError:
+                # Continue without tokenizer, will raise error if text input is used
+                pass
+
+        # Create model
+        config_path = self.path / 'config.yaml'
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found at {config_path}")
+
+        model = create_model(str(config_path))
         self.cfg = model.get_config()
 
-        adaptor_sd = {}
-        model_files = [os.path.abspath(path) for path in glob.glob(os.path.join(self.path, 'model*.safetensors'))]
-        if model_files:
-            model_sd = get_state_dict_from_safetensors(model_files, torch.device('cpu'))
-            if has_hf_keys(model_sd): model_sd = convert_hf_state_dict(model_sd)
-        else: raise FileNotFoundError(f"Model file not found in {model_files}.")
-        if self.cfg.peft: adaptor_sd = get_state_dict_from_safetensors(os.path.join(self.path, 'adaptor.safetensors'), torch.device('cpu'))
-        peft = self.cfg.peft
-        self.cfg.peft = None
+        # Load model state dict
+        model_files = list(self.path.glob('model*.safetensors'))
+        if not model_files:
+            raise FileNotFoundError(f"Model files not found in {self.path}")
 
-        model.load_state_dict(model_sd, strict=False, assign=True)  # converts the keys to suit the models
+        model_sd = self._load_state_dict(model_files)
 
-        if adaptor_sd: model_sd = get_merged_lora_ckpt(model.state_dict() | adaptor_sd, rank=peft.rank, alpha=peft.alpha)
+        # Handle PEFT adapters if present
+        adapter_sd = {}
+        adapter_path = self.path / 'adapter.safetensors'
+        peft_config = getattr(self.cfg, 'peft', None)
+
+        if peft_config and adapter_path.exists():
+            adapter_sd = get_state_dict_from_safetensors(str(adapter_path), torch.device('cpu'))
+            # Temporarily disable peft config to load base model
+            self.cfg.peft = None
+
+        # Load state dict into model
         model.load_state_dict(model_sd, strict=False, assign=True)
-        del model_sd, adaptor_sd
+
+        # Merge adapter weights
+        if adapter_sd and peft_config:
+            merged_sd = get_merged_lora_ckpt(model.state_dict() | adapter_sd, rank=peft_config.rank, alpha=peft_config.alpha)
+            model.load_state_dict(merged_sd, strict=False, assign=True)
+            self.cfg.peft = peft_config
+
+        # Clean up
+        del model_sd, adapter_sd
+        gc.collect()
 
         model.bos_token_id = self.cfg.inference.bos_token
         model.eval()
         model.to(dtype=torch.bfloat16)
         model.setup_cache(batch_size=1, dtype=torch.bfloat16, max_seq_len=self.cfg.max_seq_len)
         model.to(device=self.device)
-        gc.collect()
 
         self.model = model
-        if compiled: self._compile_model()
 
-    def _compile_model(self):
-        print('Compiling...')
+        # Compile
+        if compiled:
+            self._compile_model()
+
+    def _load_state_dict(self, model_files: List[Path]) -> Dict[str, Any]:
+        """
+        Load state dict from safetensors files.
+
+        Args:
+            model_files: List of paths to model files
+
+        Returns:
+            Model state dict
+        """
+        model_sd = get_state_dict_from_safetensors([str(path) for path in model_files], torch.device('cpu'))
+
+        # Convert HF format
+        if has_hf_keys(model_sd):
+            model_sd = convert_hf_state_dict(model_sd)
+
+        return model_sd
+
+    def _compile_model(self) -> None:
+        """Compile the model using torch.compile for faster inference."""
+        if self._is_compiled:
+            return
+
+        print('Compiling model...')
         start = time.time()
-        self.model.forward = torch.compile(self.model.forward, fullgraph=True, )
 
-        # Dry run for compilation
-        for _ in range(2): self.generate(list(range(10)), max_new_tokens=10)  # Run twice cuz idl why; but this works? somehow?
+        # Compile the forward function
+        self.model.forward = torch.compile(self.model.forward, fullgraph=True)
 
-        print(f'Compiled in {time.time() - start:.3f}s')
+        # Warm-up runs for compilation
+        for _ in range(2):
+            self.generate(list(range(10)), max_new_tokens=10)
+
+        self._is_compiled = True
+        print(f'Model compiled in {time.time() - start:.3f}s')
 
     def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False,
-                 skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
+            skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
+        """
+        Generate text from a prompt.
+
+        Args:
+            prompt: Input prompt as string or token IDs
+            max_new_tokens: Maximum number of new tokens to generate
+            return_tokens: Whether to return token IDs instead of decoded text
+            skip_special_tokens: Whether to skip special tokens when decoding
+
+        Returns:
+            Tuple containing:
+                - Generated text or tokens
+                - Number of new tokens generated
+                - Total number of tokens (input + output)
+                - Time taken for generation in seconds
+
+        Raises:
+            RuntimeError: If model is not loaded
+            ValueError: If string prompt is provided but tokenizer is not available
+        """
+        if self.model is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Reset model cache
         self.model.reset_cache()
         gc.collect()
         torch.cuda.empty_cache()
+
+        # Tokenize prompt
         if isinstance(prompt, str):
-            assert exists(self.tokenizer), "Tokenizer not found"
+            if self.tokenizer is None:
+                raise ValueError("Tokenizer not loaded but string prompt provided")
+
             encoded = self.tokenizer.encode(prompt, add_special_tokens=False)
             encoded_len = len(encoded.ids)
             tokens = torch.tensor([encoded.ids], device=self.device)
@@ -82,19 +193,62 @@ class ModelGenerationHandler:
             tokens = torch.tensor([prompt], device=self.device)
             encoded_len = len(prompt)
 
+        # Ensure prompt doesn't exceed max context length
+        max_context_len = self.model.cfg.max_seq_len
+        available_tokens = max_context_len - encoded_len
+
+        if available_tokens < max_new_tokens:
+            truncate_to = max_context_len - max_new_tokens
+            if truncate_to > 0:
+                tokens = tokens[:, -truncate_to:]
+                encoded_len = tokens.size(1)
+            else:
+                max_new_tokens = available_tokens
+
+        generation_config = self._prepare_generation_config(max_new_tokens)
+
         start = time.time()
-        top_k = self.cfg.inference.top_k if 1 <= self.cfg.inference.top_k <= self.cfg.vocab_size else None
-        if min(max_new_tokens, self.model.cfg.max_seq_len - encoded_len) < max_new_tokens:
-            tokens = tokens[:, -(self.model.cfg.max_seq_len - max_new_tokens):]
-            encoded_len = tokens.size(1)
-        out = generate(self.model, tokens, max_generated_tokens=max_new_tokens, pad_id=self.cfg.inference.pad_token,
-                          temperature=self.cfg.inference.temperature, top_k=top_k, stop_tokens=self.cfg.inference.eos_tokens, )
+        out = generate(self.model, tokens, **generation_config)
         out = out[0].tolist()
+
         total_tokens = len(out)
-        out_tokens = out[encoded_len:]
+        new_tokens = out[encoded_len:]
         generation_time = time.time() - start
 
-        if return_tokens: return out_tokens, len(out_tokens), total_tokens, generation_time
+        if return_tokens:
+            return new_tokens, len(new_tokens), total_tokens, generation_time
 
-        decoded = self.tokenizer.decode(out_tokens, skip_special_tokens=skip_special_tokens)
-        return decoded, len(out_tokens), total_tokens, generation_time
+        # Decode text
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not loaded but text output requested")
+
+        decoded = self.tokenizer.decode(new_tokens, skip_special_tokens=skip_special_tokens)
+        return decoded, len(new_tokens), total_tokens, generation_time
+
+    def _prepare_generation_config(self, max_new_tokens: int) -> Dict[str, Any]:
+        """
+        Prepare generation configuration parameters.
+
+        Args:
+            max_new_tokens: Maximum number of new tokens to generate
+
+        Returns:
+            Dictionary of generation parameters
+        """
+        inference_cfg = getattr(self.cfg, 'inference', None)
+
+        # Set up sampling parameters
+        top_k = None
+        if hasattr(inference_cfg, 'top_k'):
+            if 1 <= inference_cfg.top_k <= self.cfg.vocab_size:
+                top_k = inference_cfg.top_k
+
+        top_p = None
+        if hasattr(inference_cfg, 'top_p'):
+            if 0 <= inference_cfg.top_p <= 1:
+                top_p = inference_cfg.top_p
+
+        return {'max_generated_tokens': max_new_tokens, 'pad_id': inference_cfg.pad_token if inference_cfg else None,
+            'temperature': inference_cfg.temperature if inference_cfg else 1.0, 'top_k': top_k, 'top_p': top_p,
+            'stop_tokens': inference_cfg.eos_tokens if inference_cfg else None,
+        }
