@@ -43,6 +43,7 @@ class Attention(nn.Module):
 
         self.cache_enabled = False
         self.kv_cache = None
+        self.scaling = None
 
     @staticmethod
     def fused_qkv_hook(state_dict, prefix, *args, **kwargs):
@@ -80,6 +81,6 @@ class Attention(nn.Module):
 
         if self.cache_enabled: k, v = self.kv_cache(k, v)
 
-        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal, enable_gqa=self.num_kv_groups > 1)
+        attn = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=0., is_causal=is_causal, enable_gqa=self.num_kv_groups > 1, scale=self.scaling)
         attn = attn.transpose(1, 2).contiguous().view(bsz, seqlen, self.hidden_size)
         return self.o_proj(attn)

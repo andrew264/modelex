@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -64,6 +64,7 @@ def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_i
     """
     Generates tokens from a model conditioned on a prompt, and also returns logits for the generations.
     """
+    torch.cuda.empty_cache()
     prompt = prompt.view(1, -1) if prompt.ndim == 1 else prompt
 
     bsz, prompt_length = prompt.size()

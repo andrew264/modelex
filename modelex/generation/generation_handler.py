@@ -71,6 +71,7 @@ class ModelGenerationHandler:
             raise FileNotFoundError(f"Config file not found at {config_path}")
 
         model = create_model(str(config_path))
+        model.to(dtype=torch.bfloat16)
         self.cfg = model.get_config()
 
         # Load model state dict
@@ -87,7 +88,7 @@ class ModelGenerationHandler:
 
         if peft_config and adapter_path.exists():
             adapter_sd = get_state_dict_from_safetensors(str(adapter_path), torch.device('cpu'))
-            # Temporarily disable peft config to load base model
+        else:
             self.cfg.peft = None
 
         # Load state dict into model
@@ -103,9 +104,7 @@ class ModelGenerationHandler:
         del model_sd, adapter_sd
         gc.collect()
 
-        model.bos_token_id = self.cfg.inference.bos_token
         model.eval()
-        model.to(dtype=torch.bfloat16)
         model.setup_cache(batch_size=1, dtype=torch.bfloat16, max_seq_len=self.cfg.max_seq_len)
         model.to(device=self.device)
 
