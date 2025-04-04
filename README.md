@@ -22,12 +22,13 @@ This class accepts the following arguments:
   
     ```json
     [
-        {"role": "user", "content": "message from user"},
-        {"role": "assistant", "content": "reply to user"},
+        {"role": "user", "content": [{"type":  "text", "text":"message from user"}]},
+        {"role": "assistant", "content": [{"type":  "reason", "text":"reasoning for the query"}, {"type":  "text", "text":"reply to user"}]},
         ...
     ]
     ```
 
+- `path`: Path to the json files
 - `tokenizer_path`: Path to the tokenizer.json file.
 - `chat_format`: Chat format to use ["llama3", "gemma2", "chatml"]
 - `has_reasoning`: boolean value. weather to use reasoning tokens, must be in the JSON files with `reasoning` key

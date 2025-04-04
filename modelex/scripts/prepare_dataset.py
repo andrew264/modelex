@@ -19,6 +19,7 @@ def create_instance_from_string(class_path: str, *args):
     module_name, class_name = class_path.rsplit('.', 1)
     module = importlib.import_module(module_name)
     cls = getattr(module, class_name)
+    print(f'Creating instance of {class_path} with args: {args}')
     return cls(*args)
 
 parser = argparse.ArgumentParser(description="write dataset into parquet")

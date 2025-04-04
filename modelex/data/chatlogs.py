@@ -2,20 +2,15 @@ import datetime
 import glob
 import json
 import os
-from typing import Dict, List, Optional, TypedDict, Union
+from typing import Dict, List, Union
 
 import numpy as np
 from tokenizers import Tokenizer
 
-from modelex.data.prompt_format import ChatFormat, ChatFormatFactory, ChatFormatType
 from modelex.utils import str2bool
+from modelex.utils.conversation_format import ChatFormatFactory, ChatFormatType, Conversation
 
-class Message(TypedDict):
-    role: str
-    content: str
-    reasoning: Optional[str]
-
-class Conversations(ChatFormat):
+class Conversations:
     CROSS_ENTROPY_IGNORE_IDX = -100
     def __init__(self, path: str, tokenizer_path: str, chat_format: str = "llama3", has_reasoning: Union[bool, str] = False) -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path)
@@ -35,10 +30,12 @@ class Conversations(ChatFormat):
         self.BOT, self.EOT = fmt.BOT, fmt.EOT
         self.SH, self.EH = fmt.SH, fmt.EH
     def __len__(self, ) -> int: return len(self._files)
-    def _get_encoded(self, data: List[Message]) -> Dict[str, np.ndarray]:
+    def _get_encoded(self, data: Conversation) -> Dict[str, np.ndarray]:
         inputs, labels = [], []
         if data[0].get('role') == 'system':
-            sysprompt = data[0]['content']
+            sysprompt = ''
+            for row in data[0]['content']:
+                sysprompt += row['text'] + '\n'
             data.pop(0)
         else:
             sysprompt = self._sysprompt_default
@@ -48,10 +45,13 @@ class Conversations(ChatFormat):
         for msg in data:
             u = self._tokenizer.encode(f'{self.SH}{msg["role"]}{self.EH}', add_special_tokens=False)
             t = ''
-            if self.has_reasoning and msg.get('reasoning', ''):
-                t = f'<think>{msg["reasoning"]}</think>\n'
-            m = self._tokenizer.encode(f'{t}{msg["content"]}{self.EOT}', add_special_tokens=False)
-            combined = u.ids + m.ids
+            for row in msg['content']:
+                if row['type'] == 'reason' and self.has_reasoning:
+                    t += f'<think>{row["text"]}</think>\n'
+                else:
+                    t += row['text'] + '\n'
+            m = self._tokenizer.encode(f'{t}{self.EOT}', add_special_tokens=False)
+            combined: List[int] = u.ids + m.ids
             inputs.extend(combined)
             if msg['role'] == self._assistant_name: labels.extend(([self.CROSS_ENTROPY_IGNORE_IDX] * len(u.ids)) + m.ids)
             else: labels.extend([self.CROSS_ENTROPY_IGNORE_IDX] * len(combined))

@@ -1,9 +1,31 @@
 from enum import StrEnum
-from typing import Dict, Self, Type, TypedDict
+from typing import Dict, List, Literal, Self, Type, TypedDict, Union
 
-class Message(TypedDict):
+class TextContent(TypedDict):
+    """
+    Represents a text content item in the JSON format.
+    """
+    type: Literal["text"]
+    text: str
+
+class ReasonContent(TypedDict):
+    """
+    Represents a reasoning content item in the JSON format.
+    """
+    type: Literal["reason"]
+    text: str
+
+ContentItem = Union[TextContent, ReasonContent]
+
+class Item(TypedDict):
+    """
+    Represents a single item (e.g., a message)
+    in the overall JSON structure.
+    """
     role: str
-    content: str
+    content: List[ContentItem]
+
+Conversation = List[Item]
 
 class ChatFormat:
     BOT: str = ''  # Beginning of text token
@@ -39,11 +61,19 @@ class ChatMLFormat(ChatFormat):
     SH: str = '<|im_start|>'
     EH: str = '\n'
 
+class GraniteFormat(ChatFormat):
+    """Granite specific format."""
+    BOT: str = ''
+    EOT: str = '<|end_of_text|>\n'
+    SH: str = '<|start_of_role|>'
+    EH: str = '<|end_of_role|>'
+
 class ChatFormatType(StrEnum):
     LLAMA3 = 'llama3'
     GEMMA2 = 'gemma2'
     CUSTOM = 'custom'
     CHATML = 'chatml'
+    GRANITE = 'granite'
 
 class ChatFormatFactory:
     _formats: Dict[ChatFormatType, Type[ChatFormat]] = {
@@ -51,6 +81,7 @@ class ChatFormatFactory:
         ChatFormatType.GEMMA2: Gemma2Format,
         ChatFormatType.CUSTOM: CustomFormat,
         ChatFormatType.CHATML: ChatMLFormat,
+        ChatFormatType.GRANITE: GraniteFormat,
     }
 
     @classmethod
@@ -60,11 +91,11 @@ class ChatFormatFactory:
 
 DEFAULT_SYSTEM_PROMPT = "You are an intelligent and helpful assistant"
 
-class PromptFormatter(ChatFormat):
+class ConversationFormatter:
     def __init__(self, assistant_name: str = "assistant", chat_format: str = "llama3") -> None:
         self.assistant_name = assistant_name
         self._apply_format(chat_format)
-        self.msgs: list[Message] = []
+        self.msgs: Conversation = []
     def _apply_format(self, chat_format: str):
         fmt = ChatFormatFactory.create(ChatFormatType(chat_format))
         self.BOT, self.EOT = fmt.BOT, fmt.EOT
@@ -73,18 +104,22 @@ class PromptFormatter(ChatFormat):
         sysprompt = DEFAULT_SYSTEM_PROMPT
         msgs = self.msgs.copy()
         if msgs[0]['role'] == 'system':
-            sysprompt = msgs.pop(0)['content']
+            sysprompt = msgs.pop(0)['content'][0]['text']
         out = f'{self.BOT}{self.SH}system{self.EH}{sysprompt}{self.EOT}'
-        for m in msgs: out += f'{self.SH}{m["role"]}{self.EH}{m["content"]}{self.EOT}'
+        for msg in msgs:
+            out += f'{self.SH}{msg["role"]}{self.EH}'
+            for row in msg['content']:
+                out += row['text']
+            out += self.EOT
         return out
-    def add_msg(self, role: str, content: str) -> Self:
-        self.msgs.append(Message(role=role, content=content))
+    def add_msg(self, role: str, content: List[ContentItem]) -> Self:
+        self.msgs.append({"role": role, "content": content})
         return self
-    def add_msgs(self, msgs: list[Message]) -> Self:
+    def add_msgs(self, msgs: Conversation) -> Self:
         self.msgs.extend(msgs)
         return self
     def reset(self) -> Self:
-        self.msgs: list[Message] = []
+        self.msgs: Conversation = []
         return self
     def get_prompt_for_completion(self) -> str:
         return str(self) + f'{self.SH}{self.assistant_name}{self.EH}'

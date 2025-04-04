@@ -4,8 +4,8 @@ import os
 
 import torch
 
-from modelex.data.prompt_format import PromptFormatter
 from modelex.generation import ModelGenerationHandler
+from modelex.utils.conversation_format import ConversationFormatter
 
 torch.set_float32_matmul_precision('high')
 
@@ -36,7 +36,7 @@ def main(args):
     dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
     with open(os.path.join(args.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: sysprompt = f.read().format(datetime=dt).strip()
 
-    prompt = PromptFormatter(args.botname, chat_format=model_handler.prompt_format).add_msg('system', sysprompt)
+    prompt = ConversationFormatter(args.botname, chat_format=model_handler.prompt_format).add_msg('system', [{"type": "text", "text": sysprompt}])
 
     while True:
         inp = multiline_input(args.name)
@@ -44,9 +44,10 @@ def main(args):
         if inp.casefold() == 'reset':
             prompt.reset()
             continue
-        prompt.add_msg(args.name, inp)
+        prompt.add_msg(args.name, [{"type": "text", "text": inp}])
         decoded, num_tokens, _, generation_time = model_handler.generate(prompt.get_prompt_for_completion(), skip_special_tokens=False)
-        prompt.add_msg(args.botname, decoded)
+        if isinstance(decoded, str):
+            prompt.add_msg(args.botname, [{"type": "text", "text": decoded}])
 
         print(f"{args.botname}: {decoded}")
         print(f"Generated {num_tokens} tokens in {generation_time:.3f}s ({num_tokens / generation_time:.3f} tokens/s)")
