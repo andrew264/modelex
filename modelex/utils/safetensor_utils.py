@@ -1,4 +1,6 @@
 import time
+from pathlib import Path
+from typing import Union
 
 import torch
 from safetensors import safe_open
@@ -18,7 +20,7 @@ def get_state_dict_from_safetensors(path: str | list[str], device: torch.device 
     else: print("No weights found.")
     return state_dict
 
-def save_as_safetensors(state_dict: dict, path: str) -> None:
+def save_as_safetensors(state_dict: dict, path: Union[str, Path]) -> None:
     start = time.time()
     safe_save_file(state_dict, path)
     print(f"Saved state_dict to {path} in {time.time() - start:.3f}s.")

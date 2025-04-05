@@ -35,7 +35,7 @@ class Attention(nn.Module):
         hidden = cfg.hidden_size
         kwargs = {}
         if hasattr(cfg, 'peft') and cfg.peft and 'attn' in cfg.peft.layers:
-            kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout}
+            kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout, 'quantize_base': cfg.peft.quantize_base}
 
         self.qkv_proj = linear_factory(in_features=hidden, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias, **kwargs)
         self.o_proj = linear_factory(in_features=hidden, out_features=hidden, bias=cfg.attn_out_bias, **kwargs)

@@ -13,7 +13,7 @@ class MLP(nn.Module):
         bias = cfg.mlp_bias
         kwargs = {}
         if hasattr(cfg, 'peft') and cfg.peft and 'mlp' in cfg.peft.layers:
-            kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout}
+            kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout, 'quantize_base': cfg.peft.quantize_base}
 
         self.w1 = linear_factory(in_features=hidden, out_features=intermediate, bias=bias, **kwargs)
         self.w3 = linear_factory(in_features=hidden, out_features=intermediate, bias=bias, **kwargs)

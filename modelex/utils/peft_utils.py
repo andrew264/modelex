@@ -51,6 +51,6 @@ def set_trainable_params(model: nn.Module, adapter_params: Dict[str, Any]) -> No
 
 def setup_model_for_peft(model: nn.Module, cfg) -> None:
     set_trainable_params(model, get_adapter_params(model))
-    if cfg.peft.type == 'dora':
+    if cfg.peft.type == 'dora':  # This is for any adapters that need to be initialized after base weights have been loaded (e.g. DoRA).
         for m in model.modules():
-            if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()  # i wish someone made documentation on this ffs
+            if hasattr(m, "initialize_dora_magnitude"): m.initialize_dora_magnitude()

@@ -31,6 +31,7 @@ class TrainingConfig(BaseModel):
     batch_size: int = Field(1, gt=0)
     gradient_accumulation_steps: int = Field(1, gt=0)
     device: str = Field('cuda', description='training device')
+    dtype: str = Field('bfloat16', description='data type')
     checkpointing_layers: List[str] = Field(default_factory=list, description='List of layer names to apply gradient checkpointing')
     grad_clip: GradClipConfig = Field(default_factory=GradClipConfig)
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)

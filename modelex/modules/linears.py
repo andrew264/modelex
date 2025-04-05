@@ -4,7 +4,7 @@ import torch
 
 def linear_factory(in_features: int, out_features: int, bias: bool = True, device: Optional[torch.device] = None, dtype: torch.dtype = torch.bfloat16,
                    peft_type: Optional[str] = None, rank: Optional[int] = None, alpha: Optional[float] = None,
-                   dropout: Optional[float] = None, ) -> torch.nn.Module:
+                   dropout: Optional[float] = None, quantize_base: bool = False) -> torch.nn.Module:
     """
     Factory function for creating linear layers.
     """
@@ -18,7 +18,7 @@ def linear_factory(in_features: int, out_features: int, bias: bool = True, devic
     if rank is None:
         raise ValueError(f"Rank must be specified when peft_type is '{peft_type}'")
 
-    kwargs = {"in_dim": in_features, "out_dim": out_features, "rank": rank, "alpha": alpha, "dropout": dropout, "use_bias": bias}
+    kwargs = {"in_dim": in_features, "out_dim": out_features, "rank": rank, "alpha": alpha, "dropout": dropout, "use_bias": bias, "quantize_base": quantize_base}
 
     if peft_type == "lora":
         from torchtune.modules.peft import LoRALinear

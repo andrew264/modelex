@@ -21,6 +21,7 @@ class PeftConfig(BaseModel):
     alpha: int = Field(16, ge=1)
     dropout: float = Field(0.05, ge=0.0, le=1.0)
     layers: List[str] = Field(['attn', 'mlp', 'output'])
+    quantize_base: bool = False
 
 class LLMConfig(BaseModel):
     type: str = "LLM"

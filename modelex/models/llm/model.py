@@ -31,7 +31,7 @@ class LLM(BaseLLM):
         if not cfg.tie_word_embeddings:
             kwargs = {}
             if hasattr(cfg, 'peft') and cfg.peft and 'output' in cfg.peft.layers:
-                kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout}
+                kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout, 'quantize_base': cfg.peft.quantize_base}
             self.output = linear_factory(in_features=cfg.hidden_size, out_features=cfg.vocab_size, bias=False, **kwargs)
         else:
             self.output = TiedLinear(self.tok_embeddings)

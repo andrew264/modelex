@@ -1,5 +1,6 @@
 import enum
 import importlib
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +19,11 @@ from tqdm import tqdm
 
 from modelex.models.base import BaseLLM
 from modelex.training.trainer_config import TrainerConfig
-from modelex.utils import exists, model_summary
+from modelex.utils import exists, get_torch_dtype, model_summary, save_as_safetensors
+from modelex.utils.load import load_model, setup_peft_if_needed
+from modelex.utils.peft_utils import get_adapter_params
+
+logger = logging.getLogger(__name__)
 
 class LogPrefix(enum.StrEnum):
     """Prefixes for logging categories."""
@@ -48,21 +53,20 @@ class LLMTrainer:
     and comprehensive logging.
     """
 
-    def __init__(self, model: BaseLLM, config: Union[TrainerConfig, str, Path]):
+    def __init__(self, model_path: Union[str, Path]):
         """
         Initialize the LLM trainer.
 
         Args:
-            model: The language model to be trained
-            config: Either a TrainerConfig object or a path to a config file
+            model_path: Path to the model directory containing config.yaml and trainer_config.yaml
         """
+        self.model_path = model_path
         # Load configuration
-        if isinstance(config, (str, Path)):
-            self.config = TrainerConfig.load_config(config)
-        else:
-            self.config = config
+        trainer_config = model_path / 'trainer_config.yaml'
+        self.config = TrainerConfig.load_config(trainer_config)
 
-        self.model = model
+        self.model: Optional[BaseLLM] = None
+        self._is_peft: bool = False
 
         self.optimizer: Optional[Optimizer] = None
         self.lr_scheduler: Optional[LambdaLR] = None
@@ -70,6 +74,7 @@ class LLMTrainer:
         self.valid_dataloader: Optional[DataLoader] = None
         self.writer: Optional[SummaryWriter] = None
         self.device: Optional[torch.device] = None
+        self.dtype: torch.dtype = torch.bfloat16
 
         # Tracking variables
         self.global_steps: Dict[LogPrefix, int] = {p: 0 for p in LogPrefix}
@@ -88,19 +93,26 @@ class LLMTrainer:
         self._setup_logger()
         self._setup_misc()
 
+    @property
+    def is_peft(self) -> bool:
+        return self._is_peft
+
     def _setup_model(self) -> None:
         """Set up the model including device placement and compilation if enabled."""
         # Configure device and move model
         self.device = torch.device(self.config.training.device)
-        self.model.to(device=self.device, dtype=torch.bfloat16)
+        self.dtype = get_torch_dtype(self.config.training.dtype)
+        self.model = load_model(self.model_path, self.device, self.dtype)
+        self._is_peft = setup_peft_if_needed(self.model)
+        self.model.to(device=self.device)
 
         # Compile model
         if self.config.training.compile:
             try:
                 self.model.forward = torch.compile(self.model.forward, mode='max-autotune')
-                print("Model successfully compiled with torch.compile")
+                logger.info("Model successfully compiled with torch.compile")
             except Exception as e:
-                print(f"Warning: Failed to compile model: {str(e)}")
+                logger.warning(f"Warning: Failed to compile model: {str(e)}")
 
     def _setup_optimizer(self) -> None:
         """Initialize the optimizer based on config."""
@@ -114,7 +126,7 @@ class LLMTrainer:
                 raise ValueError("No parameters require gradients. Check model configuration.")
 
             self.optimizer = opt_class(params_to_optimize, **opt_config.params)
-            print(f"Using optimizer: {opt_class.__name__}")
+            logger.info(f"Using optimizer: {opt_class.__name__}")
         except Exception as e:
             raise RuntimeError(f"Failed to create optimizer: {str(e)}")
 
@@ -122,7 +134,7 @@ class LLMTrainer:
         """Initialize the learning rate scheduler if specified in config."""
         scheduler_config = self.config.training.scheduler
         if not exists(scheduler_config):
-            print("No learning rate scheduler configured")
+            logger.info("No learning rate scheduler configured")
             return
 
         try:
@@ -133,13 +145,13 @@ class LLMTrainer:
             if scheduler_class is get_cosine_schedule_with_warmup:
                 num_warmup_steps = int(scheduler_config.warmup_ratio * self.total_steps)
                 params.update({"num_warmup_steps": num_warmup_steps, "num_training_steps": self.total_steps})
-                print(f"Cosine scheduler with {num_warmup_steps} warmup steps of {self.total_steps} total steps")
+                logger.info(f"Cosine scheduler with {num_warmup_steps} warmup steps of {self.total_steps} total steps")
 
             if self.optimizer is None:
                 raise ValueError("Optimizer must be initialized before scheduler")
 
             self.lr_scheduler = scheduler_class(self.optimizer, **params)
-            print(f"Using learning rate scheduler: {scheduler_class.__name__}")
+            logger.info(f"Using learning rate scheduler: {scheduler_class.__name__}")
         except Exception as e:
             raise RuntimeError(f"Failed to create scheduler: {str(e)}")
 
@@ -166,7 +178,7 @@ class LLMTrainer:
             train_dataset = train_ds_class(**data_config.train_dataset.params)
             self.items_per_epoch = len(train_dataset)
             self.train_dataloader = DataLoader(train_dataset, **dataloader_cfg)
-            print(f"Training dataset: {len(train_dataset)} samples, {self.steps_per_epoch} steps per epoch")
+            logger.info(f"Training dataset: {len(train_dataset)} samples, {self.steps_per_epoch} steps per epoch")
         except Exception as e:
             raise RuntimeError(f"Failed to create training dataset: {str(e)}")
 
@@ -176,15 +188,15 @@ class LLMTrainer:
                 valid_ds_class = data_config.valid_dataset.get_instance()
                 valid_dataset = valid_ds_class(**data_config.valid_dataset.params)
                 self.valid_dataloader = DataLoader(valid_dataset, **dataloader_cfg)
-                print(f"Validation dataset: {len(valid_dataset)} samples")
+                logger.info(f"Validation dataset: {len(valid_dataset)} samples")
             except Exception as e:
-                print(f"Warning: Failed to create validation dataset: {str(e)}")
+                logger.warning(f"Warning: Failed to create validation dataset: {str(e)}")
                 self.valid_dataloader = None
 
     def _setup_logger(self) -> None:
         """Set up TensorBoard logging."""
         if not exists(self.config.logging):
-            print("Logging not configured")
+            logger.warning("Logging not configured")
             return
 
         try:
@@ -194,12 +206,12 @@ class LLMTrainer:
 
             config_path = self.log_dir / "trainer_config.yaml"
             self.config.save_config(config_path)
-            print(f"Saved configuration to {config_path}")
+            logger.info(f"Saved configuration to {config_path}")
 
             self.writer = SummaryWriter(str(self.log_dir))
-            print(f"TensorBoard logs will be saved to {self.log_dir}")
+            logger.info(f"TensorBoard logs will be saved to {self.log_dir}")
         except Exception as e:
-            print(f"Warning: Failed to set up logging: {str(e)}")
+            logger.warning(f"Warning: Failed to set up logging: {str(e)}")
             self.writer = None
 
     def _setup_misc(self) -> None:
@@ -209,9 +221,9 @@ class LLMTrainer:
                 checkpointing_layers = {get_instance(layer_path) for layer_path in self.config.training.checkpointing_layers}
 
                 set_activation_checkpointing(self.model, auto_wrap_policy=checkpointing_layers)
-                print(f"Activation checkpointing enabled for {len(checkpointing_layers)} layer types")
+                logger.info(f"Activation checkpointing enabled for {len(checkpointing_layers)} layer types")
             except Exception as e:
-                print(f"Warning: Failed to set up activation checkpointing: {str(e)}")
+                logger.warning(f"Warning: Failed to set up activation checkpointing: {str(e)}")
 
     def log(self, prefix: LogPrefix, **kwargs: Union[float, torch.Tensor, Dict[str, float]]) -> None:
         """
@@ -324,7 +336,7 @@ class LLMTrainer:
         }
 
         torch.save(checkpoint, path)
-        print(f"Checkpoint saved to {path}")
+        logger.info(f"Checkpoint saved to {path}")
         return path
 
     def load_checkpoint(self, path: Union[str, Path]) -> None:
@@ -351,7 +363,7 @@ class LLMTrainer:
         if "global_steps" in checkpoint:
             self.global_steps = checkpoint["global_steps"]
 
-        print(f"Checkpoint loaded from {path}")
+        logger.info(f"Checkpoint loaded from {path}")
 
     def train(self) -> None:
         """
@@ -454,10 +466,10 @@ class LLMTrainer:
                 if exists(self.config.logging) and self.config.logging.save_checkpoint_per_epoch:
                     self.save_checkpoint(path=self.log_dir / "checkpoints" / f"epoch_{epoch_num + 1}.pt" if self.log_dir else None)
 
-            print('Training Complete')
+            logger.info('Training Complete')
 
         except Exception as e:
-            print(f"Training interrupted: {str(e)}")
+            logger.error(f"Training interrupted: {str(e)}")
             # Save emergency checkpoint
             if exists(self.log_dir):
                 self.save_checkpoint(self.log_dir / "checkpoints" / "emergency.pt")
@@ -529,16 +541,81 @@ class LLMTrainer:
 
                 self.log(prefix=log_prefix, avg_loss=avg_loss, avg_perplexity=avg_perplexity, total_tokens=total_tokens)
 
-                print(f"Validation complete - Avg Loss: {avg_loss:.4f}, Avg PPL: {avg_perplexity:.4f}")
+                logger.info(f"Validation complete - Avg Loss: {avg_loss:.4f}, Avg PPL: {avg_perplexity:.4f}")
 
         finally:
             self.model.train()
 
+    @staticmethod
+    def remove_checkpoint_suffix(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        Remove activation checkpoint wrapper suffixes from model state dict keys.
+
+        Args:
+            state_dict: Model state dictionary
+
+        Returns:
+            Cleaned state dictionary
+        """
+        act_ckpt_wrapped_module = "._checkpoint_wrapped_module"
+        return {k.replace(act_ckpt_wrapped_module, ''): v for k, v in state_dict.items()}
+
+    def save_model_weights(self, output_path: Optional[Union[str, Path]] = None) -> None:
+        """
+        Save model weights to disk.
+
+        Args:
+            output_path: Directory where weights should be saved
+        """
+        if output_path:
+            path = Path(output_path)
+        else:
+            path = self.model_path
+
+        try:
+            if self._is_peft:
+                # Save only adapter parameters for PEFT
+                logger.info("Saving PEFT adapter parameters")
+                lora_params = self.remove_checkpoint_suffix(get_adapter_params(self.model))
+                save_path = path / 'adapter.safetensors'
+                save_as_safetensors(lora_params, save_path)
+                logger.info("Saved adapter parameters to %s", save_path)
+            else:
+                # Save full model parameters
+                logger.info("Saving full model parameters")
+                model_params = self.remove_checkpoint_suffix(self.model.state_dict())
+                save_path = path / 'model.safetensors'
+                save_as_safetensors(model_params, save_path)
+                logger.info("Saved model parameters to %s", save_path)
+        except Exception as e:
+            logger.error("Failed to save model weights: %s", str(e))
+            raise
+
+    def save_optimizer_state(self, output_path: Optional[Union[str, Path]] = None) -> None:
+        """
+        Save optimizer state to disk.
+
+        Args:
+            output_path: Directory where optimizer state should be saved
+        """
+        if output_path:
+            path = Path(output_path)
+        else:
+            path = self.model_path
+        opt_sd_file = path / 'optimizer.pt'
+
+        try:
+            torch.save(self.get_opt_state_dict(), opt_sd_file)
+            logger.info("Saved optimizer state to %s", opt_sd_file)
+        except Exception as e:
+            logger.error("Failed to save optimizer state: %s", str(e))
+            raise
+
     def close(self) -> None:
         """Clean up resources and save final logs."""
-        print('Closing Trainer...')
+        logger.info('Closing Trainer...')
 
         if exists(self.writer):
             self.writer.flush()
             self.writer.close()
-            print(f"TensorBoard logs saved to {self.log_dir}")
+            logger.info(f"TensorBoard logs saved to {self.log_dir}")
