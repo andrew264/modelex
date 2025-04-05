@@ -238,12 +238,12 @@ class ModelGenerationHandler:
 
         # Set up sampling parameters
         top_k = None
-        if hasattr(inference_cfg, 'top_k'):
+        if hasattr(inference_cfg, 'top_k') and inference_cfg.top_k is not None:
             if 1 <= inference_cfg.top_k <= self.cfg.vocab_size:
                 top_k = inference_cfg.top_k
 
         top_p = None
-        if hasattr(inference_cfg, 'top_p'):
+        if hasattr(inference_cfg, 'top_p') and inference_cfg.top_p is not None:
             if 0 <= inference_cfg.top_p <= 1:
                 top_p = inference_cfg.top_p
 
