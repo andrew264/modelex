@@ -8,7 +8,7 @@ import numpy as np
 from tokenizers import Tokenizer
 
 from modelex.utils import str2bool
-from modelex.utils.conversation_format import ChatFormatFactory, ChatFormatType, Conversation
+from modelex.utils.conversation_format import ChatFormatFactory, ChatFormatType, Conversation, ChatFormat
 
 class Conversations:
     CROSS_ENTROPY_IGNORE_IDX = -100
@@ -46,8 +46,10 @@ class Conversations:
             u = self._tokenizer.encode(f'{self.SH}{msg["role"]}{self.EH}', add_special_tokens=False)
             t = ''
             for row in msg['content']:
-                if row['type'] == 'reason' and self.has_reasoning:
-                    t += f'<think>{row["text"]}</think>\n'
+                if row['type'] == 'reason':
+                    if self.has_reasoning:
+                        t += f'<think>{row["text"]}</think>\n'
+                    else: continue
                 else:
                     t += row['text'] + '\n'
             m = self._tokenizer.encode(f'{t}{self.EOT}', add_special_tokens=False)
