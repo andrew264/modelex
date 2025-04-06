@@ -49,7 +49,11 @@ def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = N
     # change logits into probabilities
     probs = torch.nn.functional.softmax(logits, dim=-1)
     # if q is None, we use the default softmax sampling trick
-    if q is None: q = torch.empty_like(probs).exponential_(1)
+    if q is None:
+        uniform_val = torch.rand_like(probs)
+        epsilon = torch.finfo(uniform_val.dtype).eps / 2
+        condition = uniform_val >= 1.0 - epsilon
+        q = -torch.where(condition, -epsilon, torch.log(uniform_val))
 
     return multinomial_sample_one(probs, q)
 
@@ -58,7 +62,7 @@ def generate_next_token(model, input_pos: Tensor, x: Tensor, q: Tensor, *, mask:
     logits = model(input_ids=x, input_pos=input_pos, mask=mask)
     return sample(logits[:, -1].clone(), temperature=temperature, top_k=top_k, top_p=top_p, q=q)
 
-@torch.inference_mode()
+@torch.no_grad()
 def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None, top_p: Optional[float] = None,
              stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Tensor:
     """
@@ -88,7 +92,7 @@ def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_i
     else: curr_masks = masks[:, :prompt_length, :prompt_length]
 
     q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
-    tokens = generate_next_token(model, input_pos=input_pos[:, :prompt_length].squeeze(), mask=curr_masks, x=prompt,
+    tokens = generate_next_token(model, input_pos=input_pos[:, :prompt_length], mask=curr_masks, x=prompt,
                                                    temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
     generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
     curr_pos = prompt_length
@@ -113,7 +117,7 @@ def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_i
             curr_masks = masks[:, : curr_pos + 1, : curr_pos + 1]
 
         q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
-        tokens = generate_next_token(model, input_pos=curr_input_pos, x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
+        tokens = generate_next_token(model, input_pos=curr_input_pos.unsqueeze(0), x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
         generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
         curr_pos += 1
 

@@ -1,6 +1,8 @@
 import argparse
 import datetime
+import logging
 import os
+import sys
 
 import torch
 
@@ -9,11 +11,15 @@ from modelex.utils.conversation_format import ConversationFormatter
 
 torch.set_float32_matmul_precision('high')
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
+logger = logging.getLogger(__name__)
+
 parser = argparse.ArgumentParser(description="generate sequence")
 parser.add_argument("path", type=str, help="Path to the models (required)")
 parser.add_argument("--device", type=str, default="cuda", help="Device to run the models on (optional, defaults to 'cuda')")
 parser.add_argument("--name", type=str, default="user", help="Username (optional, defaults to 'user')")
 parser.add_argument("--botname", type=str, default="assistant", help="Username (optional, defaults to 'assistant')")
+parser.add_argument("--compile", action="store_true", help="Enable torch compile (optional, defaults to False)")
 
 def multiline_input(name: str = 'User'):
     lines = []
@@ -31,7 +37,7 @@ def multiline_input(name: str = 'User'):
 def main(args):
     device = torch.device(args.device)
     model_handler = ModelGenerationHandler(args.path, device=device, )
-    model_handler.load_model()
+    model_handler.load_model(compiled=args.compile)
 
     dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
     with open(os.path.join(args.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: sysprompt = f.read().format(datetime=dt).strip()

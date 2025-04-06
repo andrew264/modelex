@@ -16,8 +16,6 @@ class RotaryEmbedding(nn.Module):
 
     @torch.no_grad()
     def forward(self, position_ids: torch.LongTensor, dtype: torch.dtype = torch.bfloat16) -> Tuple[torch.Tensor, torch.Tensor]:
-        if position_ids.ndim == 1: position_ids = position_ids.unsqueeze(0)
-
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
         position_ids_expanded = position_ids[:, None, :].float()
 

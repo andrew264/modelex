@@ -15,13 +15,12 @@ from modelex.utils.peft_utils import get_merged_lora_ckpt
 logger = logging.getLogger(__name__)
 
 def get_quant_config(dtype: str):
-    from torchao.quantization.quant_api import Int8WeightOnlyConfig, Float8WeightOnlyConfig, Int4WeightOnlyGPTQQuantizer
+    from torchao.quantization.quant_api import Int8WeightOnlyConfig, Float8WeightOnlyConfig, Int4WeightOnlyConfig
     match dtype:
         case 'int8': return Int8WeightOnlyConfig()
         case 'float8': return Float8WeightOnlyConfig()
-        case 'int4': return Int4WeightOnlyGPTQQuantizer()
+        case 'int4': return Int4WeightOnlyConfig(use_hqq=True)
         case _: raise ValueError(f'unknown quantization dtype: {dtype}')
-
 
 class ModelGenerationHandler:
     """Handles loading and generation for ML models."""
@@ -166,17 +165,17 @@ class ModelGenerationHandler:
         start = time.time()
 
         # Compile the forward function
-        self.model.forward = torch.compile(self.model.forward, fullgraph=True)
+        self.model.forward = torch.compile(self.model.forward, dynamic=True, mode="max-autotune-no-cudagraphs")
 
         # Warm-up runs for compilation
-        for _ in range(2):
-            self.generate(list(range(10)), max_new_tokens=10)
+        for i in range(2):
+            self.generate(list(range(10 * (i + 1))), max_new_tokens=5)
 
         self._is_compiled = True
         logger.info(f'Model compiled in {time.time() - start:.3f}s')
 
     def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False,
-            skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
+                 skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
         """
         Generate text from a prompt.
 
@@ -274,6 +273,6 @@ class ModelGenerationHandler:
                 top_p = inference_cfg.top_p
 
         return {'max_generated_tokens': max_new_tokens, 'pad_id': inference_cfg.pad_token if inference_cfg else None,
-            'temperature': inference_cfg.temperature if inference_cfg else 1.0, 'top_k': top_k, 'top_p': top_p,
-            'stop_tokens': inference_cfg.eos_tokens if inference_cfg else None,
-        }
+                'temperature': inference_cfg.temperature if inference_cfg else 1.0, 'top_k': top_k, 'top_p': top_p,
+                'stop_tokens': inference_cfg.eos_tokens if inference_cfg else None,
+                }
