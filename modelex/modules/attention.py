@@ -62,7 +62,7 @@ class Attention(nn.Module):
         if self.caches_are_setup(): print("Key value caches are already setup. You cannot call ``setup_caches()`` twice. Skipping.")
         else:
             self.kv_cache = KVCache(batch_size=batch_size, max_seq_len=max_seq_len, num_heads=self.num_kv_heads, head_dim=self.head_dim,
-                                    dtype=dtype, )
+                                    dtype=dtype)
             self.cache_enabled = True
     def reset_cache(self):
         if not exists(self.kv_cache): raise RuntimeError("Key value caches are not setup. Call ``setup_caches()`` first.")

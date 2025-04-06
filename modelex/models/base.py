@@ -7,11 +7,12 @@ from pydantic import BaseModel
 from torch import Tensor
 
 class BaseLLM(nn.Module, ABC):
-    def __init__(self, cfg: BaseModel):
+    def __init__(self, cfg: BaseModel, skip_peft: bool = False):
         super().__init__()
+        if hasattr(cfg, 'peft') and skip_peft: cfg.peft = None
         self.cfg = cfg
         self._cache_setup_complete: bool = False
-    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None, ):
+    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None):
         if self._cache_setup_complete: return
         self._cache_setup_complete = True
     def reset_cache(self):
@@ -34,7 +35,7 @@ class BaseLLM(nn.Module, ABC):
 
     @classmethod
     @abstractmethod
-    def from_config(cls, config: BaseModel) -> Self:
+    def from_config(cls, config: BaseModel, skip_peft: bool = False) -> Self:
         ...
 
     def forward(self, **kwargs) -> Tensor:

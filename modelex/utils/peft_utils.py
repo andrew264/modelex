@@ -7,7 +7,7 @@ def _get_lora_modules(state_dict: Dict[str, Any]) -> Set[str]:
     lora_keys = [k for k in state_dict.keys() if "lora" in k or "magnitude" in k]
     return set([k.replace(".lora_a.weight", "").replace(".lora_b.weight", "").replace(".magnitude", "") for k in lora_keys])
 
-@torch.no_grad
+@torch.no_grad()
 def get_merged_lora_ckpt(state_dict: Dict[str, Any], rank: int, alpha: float, ) -> Dict[str, Any]:
     lora_modules = _get_lora_modules(state_dict)
     for module in lora_modules:

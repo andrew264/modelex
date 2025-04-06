@@ -11,7 +11,7 @@ def get_state_dict_from_safetensors(path: str | list[str], device: torch.device 
     if isinstance(path, str): path = [path]
     if path:
         start = time.time()
-        d = device.type if device.type == 'cpu' else device.index
+        d = device.type if device.type == 'cpu' else 0
         for p in path:
             with safe_open(p, framework="pt", device=d) as f:
                 for k in f.keys(): state_dict[k] = f.get_tensor(k).to(dtype=dtype)

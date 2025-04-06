@@ -19,11 +19,11 @@ except ImportError:
    
 @register_model("LLM")
 class LLM(BaseLLM):
-    def __init__(self, cfg: Union[LLMConfig, dict, str], ) -> None:
+    def __init__(self, cfg: Union[LLMConfig, dict, str], skip_peft: bool = False) -> None:
         if isinstance(cfg, dict): cfg = LLMConfig(**cfg)
         elif isinstance(cfg, str): cfg = LLMConfig.load_config(os.path.join(cfg, 'models.yaml'))
         super(LLM, self).__init__(cfg)
-
+        if hasattr(cfg, 'peft') and skip_peft: cfg.peft = None
         self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.inference.pad_token)
         self.layers = nn.ModuleList([Block(cfg, idx) for idx in range(cfg.num_layers)])
         self.norm = nn.RMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
@@ -38,9 +38,9 @@ class LLM(BaseLLM):
         self._cache_setup_complete = False
         self.ignore_labels_cache = None
     @classmethod
-    def from_config(cls, config: LLMConfig) -> Self:
-        return cls(config)
-    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None, ):
+    def from_config(cls, config: LLMConfig, skip_peft: bool = False) -> Self:
+        return cls(config, skip_peft)
+    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None):
         if self._cache_setup_complete: return
         for layer in self.layers:
             layer.setup_cache(batch_size=batch_size, dtype=dtype, max_seq_len=max_seq_len)

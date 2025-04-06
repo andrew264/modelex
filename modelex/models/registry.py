@@ -18,7 +18,7 @@ def register_model(name: str):
         return cls
     return decorator
 
-def create_model(config_path: str | Path) -> BaseLLM:
+def create_model(config_path: str | Path, skip_peft: bool = False) -> BaseLLM:
     """
     Creates a model instance from a configuration file.
     """
@@ -38,4 +38,4 @@ def create_model(config_path: str | Path) -> BaseLLM:
     cfg_cls = getattr(module, f'{class_name}Config')
     cfg = cfg_cls.model_validate(config_data)
 
-    return model_cls.from_config(cfg)
+    return model_cls.from_config(cfg, skip_peft=skip_peft)

@@ -14,6 +14,7 @@ class InferenceConfig(BaseModel):
     top_k: Optional[int] = Field(None, ge=1)
     top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
     temperature: float = Field(1.0, ge=0.0)
+    quant_dtype: Optional[str] = None
 
 class PeftConfig(BaseModel):
     type: Literal['lora', 'dora'] = 'lora'

@@ -14,7 +14,7 @@ class Block(nn.Module):
         self.mlp = MLP(cfg, )
         self.sa_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
         self.mlp_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
-    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None, ):
+    def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None):
         self.attn.setup_cache(batch_size=batch_size, dtype=dtype, max_seq_len=max_seq_len)
     def reset_cache(self): self.attn.reset_cache()
     def forward(self, x: Tensor, freqs: Tensor, attn_mask: Optional[Tensor] = None) -> Tensor:

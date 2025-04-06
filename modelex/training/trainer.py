@@ -521,8 +521,7 @@ class LLMTrainer:
                     elapsed = time.perf_counter() - t0
                     tokens_per_sec = current_num_tokens / elapsed if elapsed > 0 else 0
 
-                    log_dict = {'loss': _loss, 'perplexity': _perplexity, 'tokens_per_sec': tokens_per_sec
-                    }
+                    log_dict = {'loss': _loss, 'perplexity': _perplexity, 'tokens_per_sec': tokens_per_sec}
 
                     if self.device.type == 'cuda':
                         log_dict.update(get_memory_stats(device=self.device))

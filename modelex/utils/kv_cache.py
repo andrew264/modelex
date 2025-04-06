@@ -4,7 +4,7 @@ import torch
 from torch import nn, Tensor
 
 class KVCache(nn.Module):
-    def __init__(self, batch_size: int, max_seq_len: int, num_heads: int, head_dim: int, dtype: torch.dtype, ) -> None:
+    def __init__(self, batch_size: int, max_seq_len: int, num_heads: int, head_dim: int, dtype: torch.dtype) -> None:
         super().__init__()
         cache_shape = (batch_size, num_heads, max_seq_len, head_dim)
         self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype), persistent=False)
@@ -14,8 +14,8 @@ class KVCache(nn.Module):
 
     def reset(self) -> None:
         """Reset the cache to zero."""
-        self.k_cache.zero_()
-        self.v_cache.zero_()
+        # self.k_cache.zero_()
+        # self.v_cache.zero_()
         self.size = 0
 
     @torch.no_grad()

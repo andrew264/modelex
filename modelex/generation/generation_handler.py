@@ -1,4 +1,5 @@
 import gc
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -7,9 +8,20 @@ import torch
 from tokenizers import Tokenizer
 
 from modelex.models.registry import create_model
-from modelex.utils import convert_hf_state_dict, exists, get_state_dict_from_safetensors, has_hf_keys
+from modelex.utils import convert_hf_state_dict, exists, get_state_dict_from_safetensors, has_hf_keys, set_default_dtype
 from modelex.utils.generation_utils import generate
 from modelex.utils.peft_utils import get_merged_lora_ckpt
+
+logger = logging.getLogger(__name__)
+
+def get_quant_config(dtype: str):
+    from torchao.quantization.quant_api import Int8WeightOnlyConfig, Float8WeightOnlyConfig, Int4WeightOnlyGPTQQuantizer
+    match dtype:
+        case 'int8': return Int8WeightOnlyConfig()
+        case 'float8': return Float8WeightOnlyConfig()
+        case 'int4': return Int4WeightOnlyGPTQQuantizer()
+        case _: raise ValueError(f'unknown quantization dtype: {dtype}')
+
 
 class ModelGenerationHandler:
     """Handles loading and generation for ML models."""
@@ -70,9 +82,10 @@ class ModelGenerationHandler:
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found at {config_path}")
 
-        model = create_model(str(config_path))
-        model.to(dtype=torch.bfloat16)
-        self.cfg = model.get_config()
+        with self.device, set_default_dtype(torch.bfloat16):
+            model = create_model(config_path, skip_peft=True)  # always skip initializing peft stuff cuz we merge the adapter weights
+        self.cfg = model.cfg.load_config(config_path)  # load cfg with peft parameters
+        logger.info(f'{self.cfg.type} loaded')
 
         # Load model state dict
         model_files = list(self.path.glob('model*.safetensors'))
@@ -80,6 +93,7 @@ class ModelGenerationHandler:
             raise FileNotFoundError(f"Model files not found in {self.path}")
 
         model_sd = self._load_state_dict(model_files)
+        logger.info(f'loaded state_dict')
 
         # Handle PEFT adapters if present
         adapter_sd = {}
@@ -87,26 +101,37 @@ class ModelGenerationHandler:
         peft_config = getattr(self.cfg, 'peft', None)
 
         if peft_config and adapter_path.exists():
-            adapter_sd = get_state_dict_from_safetensors(str(adapter_path), torch.device('cpu'))
+            logger.info(f'found adapter weights at {adapter_path}')
+            adapter_sd = get_state_dict_from_safetensors(str(adapter_path), self.device)
         else:
+            logger.info('no adapter weights found')
             self.cfg.peft = None
 
         # Load state dict into model
-        model.load_state_dict(model_sd, strict=False, assign=True)
+        model.load_state_dict(model_sd, strict=False)
 
         # Merge adapter weights
         if adapter_sd and peft_config:
+            logger.info(f'merging adapter weights with base weights')
             merged_sd = get_merged_lora_ckpt(model.state_dict() | adapter_sd, rank=peft_config.rank, alpha=peft_config.alpha)
-            model.load_state_dict(merged_sd, strict=False, assign=True)
+            model.load_state_dict(merged_sd, strict=False)
             self.cfg.peft = peft_config
+            del merged_sd
 
         # Clean up
         del model_sd, adapter_sd
         gc.collect()
 
         model.eval()
-        model.setup_cache(batch_size=1, dtype=torch.bfloat16, max_seq_len=self.cfg.max_seq_len)
-        model.to(device=self.device)
+        logger.info('setting up kv cache')
+        with self.device:
+            model.setup_cache(batch_size=1, dtype=torch.bfloat16, max_seq_len=self.cfg.max_seq_len)
+
+        if self.cfg.inference.quant_dtype is not None:
+            from torchao.quantization import quantize_
+            quant_cfg = get_quant_config(self.cfg.inference.quant_dtype)
+            logger.info(f'applying {self.cfg.inference.quant_dtype} quantization to {self.cfg.type}')
+            quantize_(model.layers, quant_cfg, device=self.device)
 
         self.model = model
 
@@ -137,7 +162,7 @@ class ModelGenerationHandler:
         if self._is_compiled:
             return
 
-        print('Compiling model...')
+        logger.info('Compiling model...')
         start = time.time()
 
         # Compile the forward function
@@ -148,7 +173,7 @@ class ModelGenerationHandler:
             self.generate(list(range(10)), max_new_tokens=10)
 
         self._is_compiled = True
-        print(f'Model compiled in {time.time() - start:.3f}s')
+        logger.info(f'Model compiled in {time.time() - start:.3f}s')
 
     def generate(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False,
             skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
@@ -222,6 +247,7 @@ class ModelGenerationHandler:
             raise ValueError("Tokenizer not loaded but text output requested")
 
         decoded = self.tokenizer.decode(new_tokens, skip_special_tokens=skip_special_tokens)
+        torch.cuda.empty_cache()
         return decoded, len(new_tokens), total_tokens, generation_time
 
     def _prepare_generation_config(self, max_new_tokens: int) -> Dict[str, Any]:
