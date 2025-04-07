@@ -1,5 +1,6 @@
 import argparse
 import importlib
+import os
 import sys
 
 def main():
@@ -31,4 +32,6 @@ def main():
         raise e
 
 if __name__ == '__main__':
+    # Reduce VRAM usage by reducing fragmentation
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     main()

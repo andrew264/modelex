@@ -26,8 +26,9 @@ def update_stop_tokens_tracker(tokens: Tensor, stop_tokens: Tensor, stop_token_r
 
 def multinomial_sample_one(probs: Tensor, q: Tensor) -> Tensor:
     """Samples from a multinomial distribution."""
-    return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
+    return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int64)
 
+@torch.compile
 def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = None, top_p: Optional[float] = None, q: Optional[Tensor] = None, ) -> Tensor:
     # scale the logits based on temperature
     logits = logits / max(temperature, 1e-5)
@@ -56,6 +57,7 @@ def sample(logits: Tensor, *, temperature: float = 1.0, top_k: Optional[int] = N
         q = -torch.where(condition, -epsilon, torch.log(uniform_val))
 
     return multinomial_sample_one(probs, q)
+
 
 def generate_next_token(model, input_pos: Tensor, x: Tensor, q: Tensor, *, mask: Optional[Tensor] = None, temperature: float = 1.0,
                         top_k: Optional[int] = None, top_p: Optional[float] = None,) -> Tensor:

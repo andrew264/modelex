@@ -211,9 +211,9 @@ class ModelGenerationHandler:
 
             encoded = self.tokenizer.encode(prompt, add_special_tokens=False)
             encoded_len = len(encoded.ids)
-            tokens = torch.tensor([encoded.ids], device=self.device)
+            tokens = torch.tensor([encoded.ids], device=self.device, dtype=torch.int64)
         else:
-            tokens = torch.tensor([prompt], device=self.device)
+            tokens = torch.tensor([prompt], device=self.device, dtype=torch.int64)
             encoded_len = len(prompt)
 
         # Ensure prompt doesn't exceed max context length
