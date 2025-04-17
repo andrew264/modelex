@@ -59,6 +59,7 @@ class DataConfig(BaseModel):
     num_workers: int = Field(0, ge=0)
     pin_memory: bool = True
     collate_fn: Optional[CollateFnConfig] = None
+    shuffle: Optional[bool] = None
 
 class TrainerConfig(BaseModel):
     training: TrainingConfig = Field(default_factory=TrainingConfig)

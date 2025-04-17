@@ -25,25 +25,13 @@ class GraniteAttention(Attention):
         super(GraniteAttention, self).__init__(cfg=cfg, layer_idx=layer_idx)
         self.scaling = cfg.attention_multiplier
 
-class GraniteRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.variance_epsilon = eps
-    def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.to(input_dtype)
-
 class GraniteBlock(nn.Module):
     def __init__(self, cfg: GraniteConfig, layer_idx: int, ) -> None:
         super().__init__()
         self.attn = GraniteAttention(cfg, layer_idx=layer_idx, )
         self.mlp = MLP(cfg, )
-        self.sa_norm = GraniteRMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
-        self.mlp_norm = GraniteRMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
+        self.sa_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
+        self.mlp_norm = nn.RMSNorm(cfg.hidden_size, cfg.rms_norm_eps)
         self.residual_multiplier = cfg.residual_multiplier
     def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: Optional[int] = None):
         self.attn.setup_cache(batch_size=batch_size, dtype=dtype, max_seq_len=max_seq_len)
@@ -61,7 +49,7 @@ class Granite(BaseLLM):
         if hasattr(cfg, 'peft') and skip_peft: cfg.peft = None
         self.tok_embeddings = nn.Embedding(cfg.vocab_size, cfg.hidden_size, padding_idx=cfg.inference.pad_token)
         self.layers = nn.ModuleList([GraniteBlock(cfg, idx) for idx in range(cfg.num_layers)])
-        self.norm = GraniteRMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
+        self.norm = nn.RMSNorm(cfg.hidden_size, eps=cfg.rms_norm_eps)
         self.rotary_emb = RotaryEmbedding(cfg)
         if not cfg.tie_word_embeddings:
             kwargs = {}

@@ -18,7 +18,7 @@ from torchtune.utils import batch_to_device
 from tqdm import tqdm
 
 from modelex.models.base import BaseLLM
-from modelex.training.trainer_config import TrainerConfig
+from modelex.training.trainer_config import DataConfig, TrainerConfig
 from modelex.utils import exists, get_torch_dtype, model_summary, save_as_safetensors
 from modelex.utils.load import load_model, setup_peft_if_needed
 from modelex.utils.peft_utils import get_adapter_params
@@ -62,6 +62,8 @@ class LLMTrainer:
         """
         self.model_path = model_path
         # Load configuration
+        if isinstance(model_path, str):
+            model_path = Path(model_path)
         trainer_config = model_path / 'trainer_config.yaml'
         self.config = TrainerConfig.load_config(trainer_config)
 
@@ -109,7 +111,7 @@ class LLMTrainer:
         # Compile model
         if self.config.training.compile:
             try:
-                self.model.forward = torch.compile(self.model.forward, mode='max-autotune')
+                self.model.forward = torch.compile(self.model.forward, dynamic=True, mode='max-autotune-no-cudagraphs')
                 logger.info("Model successfully compiled with torch.compile")
             except Exception as e:
                 logger.warning(f"Warning: Failed to compile model: {str(e)}")
@@ -157,7 +159,7 @@ class LLMTrainer:
 
     def _setup_data(self) -> None:
         """Set up training and validation data loaders."""
-        data_config = self.config.data
+        data_config: DataConfig = self.config.data
         batch_size = self.config.training.batch_size
 
         # Common dataloader config
@@ -177,7 +179,8 @@ class LLMTrainer:
             train_ds_class = data_config.train_dataset.get_instance()
             train_dataset = train_ds_class(**data_config.train_dataset.params)
             self.items_per_epoch = len(train_dataset)
-            self.train_dataloader = DataLoader(train_dataset, **dataloader_cfg)
+            train_dataloader_cfg = dataloader_cfg | {"shuffle": data_config.shuffle}
+            self.train_dataloader = DataLoader(train_dataset, **train_dataloader_cfg)
             logger.info(f"Training dataset: {len(train_dataset)} samples, {self.steps_per_epoch} steps per epoch")
         except Exception as e:
             raise RuntimeError(f"Failed to create training dataset: {str(e)}")
