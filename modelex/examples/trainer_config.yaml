@@ -42,3 +42,6 @@ training:
   scheduler:
     class_path: torchtune.training.lr_schedulers.get_cosine_schedule_with_warmup
     warmup_ratio: 0.1
+    params:
+      num_training_steps: "{total_steps}"
+      num_warmup_steps: "{warmup_steps}"

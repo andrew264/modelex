@@ -7,13 +7,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import torch
-from torch import Tensor
+from torch import autocast, GradScaler, Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchtune.training import get_memory_stats, set_activation_checkpointing
-from torchtune.training.lr_schedulers import get_cosine_schedule_with_warmup
 from torchtune.utils import batch_to_device
 from tqdm import tqdm
 
@@ -72,6 +71,7 @@ class LLMTrainer:
 
         self.optimizer: Optional[Optimizer] = None
         self.lr_scheduler: Optional[LambdaLR] = None
+        self.scaler: Optional[GradScaler] = None
         self.train_dataloader: Optional[DataLoader] = None
         self.valid_dataloader: Optional[DataLoader] = None
         self.writer: Optional[SummaryWriter] = None
@@ -133,27 +133,43 @@ class LLMTrainer:
             raise RuntimeError(f"Failed to create optimizer: {str(e)}")
 
     def _setup_scheduler(self) -> None:
-        """Initialize the learning rate scheduler if specified in config."""
+        """
+        Initialize the learning rate scheduler if specified in config.
+        Resolves dynamic placeholders in scheduler parameters.
+        """
         scheduler_config = self.config.training.scheduler
         if not exists(scheduler_config):
-            logger.info("No learning rate scheduler configured")
+            logger.info("No learning rate scheduler configured.")
             return
+
+        if self.optimizer is None:
+            raise ValueError("Optimizer must be initialized before the scheduler.")
 
         try:
             scheduler_class = scheduler_config.get_instance()
             params = scheduler_config.params.copy()
 
-            # Special handling for cosine scheduler
-            if scheduler_class is get_cosine_schedule_with_warmup:
-                num_warmup_steps = int(scheduler_config.warmup_ratio * self.total_steps)
-                params.update({"num_warmup_steps": num_warmup_steps, "num_training_steps": self.total_steps})
-                logger.info(f"Cosine scheduler with {num_warmup_steps} warmup steps of {self.total_steps} total steps")
+            # 1. Prepare the context of available dynamic values.
+            num_warmup_steps = int(scheduler_config.warmup_ratio * self.total_steps)
 
-            if self.optimizer is None:
-                raise ValueError("Optimizer must be initialized before scheduler")
+            context = {"total_steps": self.total_steps, "warmup_steps": num_warmup_steps, "steps_per_epoch": self.steps_per_epoch}
+            logger.info(f"Scheduler context: total_steps={context['total_steps']}, warmup_steps={context['warmup_steps']}")
 
+            # 2. Resolve placeholders in the scheduler's parameters.
+            for key, value in params.items():
+                if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+                    placeholder = value.strip('{}')
+                    if placeholder in context:
+                        resolved_value = context[placeholder]
+                        params[key] = resolved_value
+                        logger.info(f"Resolved scheduler param '{key}': '{value}' -> {resolved_value}")
+                    else:
+                        logger.warning(f"Unknown placeholder '{value}' for scheduler param '{key}'.")
+
+            # 3. Instantiate the scheduler with the resolved parameters.
             self.lr_scheduler = scheduler_class(self.optimizer, **params)
-            logger.info(f"Using learning rate scheduler: {scheduler_class.__name__}")
+            logger.info(f"Using learning rate scheduler: {scheduler_class.__name__} with params: {params}")
+
         except Exception as e:
             raise RuntimeError(f"Failed to create scheduler: {str(e)}")
 
@@ -178,7 +194,11 @@ class LLMTrainer:
         try:
             train_ds_class = data_config.train_dataset.get_instance()
             train_dataset = train_ds_class(**data_config.train_dataset.params)
-            self.items_per_epoch = len(train_dataset)
+            try:
+                self.items_per_epoch = len(train_dataset)
+            except TypeError:  # iterable dataset
+                self.items_per_epoch = 0
+                logger.info("Using an iterable-style dataset. `max_steps` per epoch will be used.")
             train_dataloader_cfg = dataloader_cfg | {"shuffle": data_config.shuffle}
             self.train_dataloader = DataLoader(train_dataset, **train_dataloader_cfg)
             logger.info(f"Training dataset: {len(train_dataset)} samples, {self.steps_per_epoch} steps per epoch")
@@ -227,6 +247,11 @@ class LLMTrainer:
                 logger.info(f"Activation checkpointing enabled for {len(checkpointing_layers)} layer types")
             except Exception as e:
                 logger.warning(f"Warning: Failed to set up activation checkpointing: {str(e)}")
+
+        # Initialize GradScaler for float16 mixed-precision training
+        if self.config.training.dtype == 'float16':
+            self.scaler = GradScaler(device=self.device.type)
+            logger.info("Using GradScaler for fp16 mixed-precision training.")
 
     def log(self, prefix: LogPrefix, **kwargs: Union[float, torch.Tensor, Dict[str, float]]) -> None:
         """
@@ -278,7 +303,12 @@ class LLMTrainer:
     @property
     def steps_per_epoch(self) -> int:
         """Calculate number of optimization steps per epoch."""
-        return self.items_per_epoch // (self.config.training.batch_size * self.config.training.gradient_accumulation_steps)
+        if self.items_per_epoch > 0:
+            return self.items_per_epoch // (self.config.training.batch_size * self.config.training.gradient_accumulation_steps)
+        max_steps = self.config.data.train_dataset.max_steps
+        if not max_steps:
+            raise ValueError("For iterable datasets (without `__len__`), `data.train_dataset.max_steps` must be specified in the trainer config.")
+        return max_steps
 
     def _loss_step(self, batch: dict, prefix: LogPrefix = LogPrefix.TRAIN) -> Tensor:
         """
@@ -298,9 +328,9 @@ class LLMTrainer:
         mask = batch.get("mask", None)
         labels = batch.get("labels")
 
-        output = self.model.train_step(input_ids=input_ids, input_pos=input_pos, mask=mask, labels=labels)
-
-        loss = output.get('loss')
+        with autocast(device_type=self.device.type, enabled=self.dtype != torch.float32, dtype=self.dtype):
+            output = self.model.train_step(input_ids=input_ids, input_pos=input_pos, mask=mask, labels=labels)
+            loss = output.get('loss')
 
         self.log(prefix=prefix, crossentropy_loss=loss.item())
 
@@ -335,8 +365,9 @@ class LLMTrainer:
             path.parent.mkdir(exist_ok=True, parents=True)
 
         checkpoint = {"model": self.model.state_dict(), "optimizer": self.get_opt_state_dict() if self.optimizer else None,
-            "lr_scheduler": self.lr_scheduler.state_dict() if self.lr_scheduler else None, "global_steps": self.global_steps, "config": self.config
-        }
+                      "lr_scheduler": self.lr_scheduler.state_dict() if self.lr_scheduler else None, "global_steps": self.global_steps,
+                      "config": self.config
+                      }
 
         torch.save(checkpoint, path)
         logger.info(f"Checkpoint saved to {path}")
@@ -367,6 +398,48 @@ class LLMTrainer:
             self.global_steps = checkpoint["global_steps"]
 
         logger.info(f"Checkpoint loaded from {path}")
+
+    def _train_step(self, accumulated_loss: Tensor, num_tokens: int) -> Dict[str, Tensor]:
+        """
+        Performs a single optimization step, including backward pass, clipping, and returning metrics.
+
+        Args:
+            accumulated_loss: The sum of losses over the accumulation window.
+            num_tokens: The number of tokens processed in the accumulation window.
+
+        Returns:
+            A dictionary of metrics (loss, grad_norm) as tensors.
+        """
+        train_config = self.config.training
+
+        # 1. Normalize loss
+        loss = accumulated_loss / num_tokens
+        metrics = {'loss': loss.detach()}
+
+        # 2. Backward pass
+        if self.scaler:
+            self.scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        # 3. Gradient clipping
+        if train_config.grad_clip.enabled:
+            if self.scaler:
+                self.scaler.unscale_(self.optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=train_config.grad_clip.max_norm)
+            metrics['grad_norm'] = grad_norm
+
+        # 4. Update parameters
+        if self.scaler:
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            self.optimizer.step()
+
+        self.optimizer.zero_grad(set_to_none=True)
+        self._scheduler_step()
+
+        return metrics
 
     def train(self) -> None:
         """
@@ -409,23 +482,10 @@ class LLMTrainer:
                     running_loss += loss * current_num_tokens
 
                     if (idx + 1) % train_config.gradient_accumulation_steps == 0:
-                        loss = running_loss / num_tokens
+                        metrics = self._train_step(running_loss, num_tokens)
 
-                        # Backward pass
-                        loss.backward()
-
-                        # Gradient clipping
-                        grad_norm = None
-                        if train_config.grad_clip.enabled:
-                            grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=train_config.grad_clip.max_norm)
-
-                        # Update parameters
-                        self.optimizer.step()
-                        self.optimizer.zero_grad(set_to_none=True)
-                        self._scheduler_step()
-
-                        _loss = loss.item()
-                        _perplexity = torch.exp(loss).item()
+                        _loss = metrics['loss']
+                        _perplexity = torch.exp(_loss)
 
                         progress_bar.update(1)
                         progress_bar.set_description(f'Epoch: {epoch_num + 1}/{train_config.epochs} | '
@@ -438,19 +498,21 @@ class LLMTrainer:
                             elapsed = time.perf_counter() - t0
                             tokens_per_sec = num_tokens / elapsed if elapsed > 0 else 0
 
-                            log_dict = {'loss': _loss, 'perplexity': _perplexity,
-                                        'lr': self.optimizer.param_groups[0]['lr'], 'tokens_per_sec': tokens_per_sec}
+                            log_dict = {'loss': _loss, 'perplexity': _perplexity, 'lr': self.optimizer.param_groups[0]['lr'],
+                                        'tokens_per_sec': tokens_per_sec
+                                        }
 
                             if self.device.type == 'cuda':
                                 log_dict.update(get_memory_stats(device=self.device))
 
-                            if train_config.grad_clip.enabled and exists(grad_norm):
-                                log_dict['grad_norm'] = grad_norm
+                            # Add grad_norm from metrics if it exists
+                            if 'grad_norm' in metrics:
+                                log_dict['grad_norm'] = metrics['grad_norm']
 
                             self.log(prefix=log_prefix, **log_dict)
 
-                            if (exists(self.config.logging.checkpoint_frequency) and
-                                    self.global_steps[log_prefix] % self.config.logging.checkpoint_frequency == 0):
+                            if (exists(self.config.logging.checkpoint_frequency) and self.global_steps[
+                                log_prefix] % self.config.logging.checkpoint_frequency == 0):
                                 self.save_checkpoint()
 
                         self.global_steps[log_prefix] += 1
@@ -499,43 +561,43 @@ class LLMTrainer:
         self.model.eval()
 
         try:
-            for idx, batch in enumerate(self.valid_dataloader):
-                if idx >= max_steps:
-                    break
+            with torch.inference_mode():
+                for idx, batch in enumerate(self.valid_dataloader):
+                    if idx >= max_steps:
+                        break
 
-                current_num_tokens = (batch.get("labels") != -100).sum()
-                total_tokens += current_num_tokens
+                    current_num_tokens = (batch.get("labels") != -100).sum()
+                    total_tokens += current_num_tokens
 
-                with torch.no_grad():
                     loss = self._loss_step(batch, prefix=log_prefix)
 
-                total_loss += loss.item() * current_num_tokens
+                    total_loss += loss.item() * current_num_tokens
 
-                _loss = loss.item()
-                _perplexity = torch.exp(loss).item()
+                    _loss = loss.item()
+                    _perplexity = torch.exp(loss).item()
 
-                progress_bar.update(1)
-                progress_bar.set_description(f'Validation | Batch: {idx + 1}/{max_steps} | '
-                                             f'Loss: {_loss:.3f} | '
-                                             f'PPL: {_perplexity:.3f}')
+                    progress_bar.update(1)
+                    progress_bar.set_description(f'Validation | Batch: {idx + 1}/{max_steps} | '
+                                                 f'Loss: {_loss:.3f} | '
+                                                 f'PPL: {_perplexity:.3f}')
 
-                # Log
-                if exists(self.config.logging) and self.global_steps[log_prefix] % self.config.logging.log_frequency == 0:
-                    elapsed = time.perf_counter() - t0
-                    tokens_per_sec = current_num_tokens / elapsed if elapsed > 0 else 0
+                    # Log
+                    if exists(self.config.logging) and self.global_steps[log_prefix] % self.config.logging.log_frequency == 0:
+                        elapsed = time.perf_counter() - t0
+                        tokens_per_sec = current_num_tokens / elapsed if elapsed > 0 else 0
 
-                    log_dict = {'loss': _loss, 'perplexity': _perplexity, 'tokens_per_sec': tokens_per_sec}
+                        log_dict = {'loss': _loss, 'perplexity': _perplexity, 'tokens_per_sec': tokens_per_sec}
 
-                    if self.device.type == 'cuda':
-                        log_dict.update(get_memory_stats(device=self.device))
+                        if self.device.type == 'cuda':
+                            log_dict.update(get_memory_stats(device=self.device))
 
-                    self.log(prefix=log_prefix, **log_dict)
+                        self.log(prefix=log_prefix, **log_dict)
 
-                self.global_steps[log_prefix] += 1
-                t0 = time.perf_counter()
+                    self.global_steps[log_prefix] += 1
+                    t0 = time.perf_counter()
 
-                # Clear cache to prevent OOM
-                torch.cuda.empty_cache()
+                    # Clear cache to prevent OOM
+                    torch.cuda.empty_cache()
 
             if total_tokens > 0 and exists(self.config.logging):
                 avg_loss = total_loss / total_tokens
@@ -546,6 +608,7 @@ class LLMTrainer:
                 logger.info(f"Validation complete - Avg Loss: {avg_loss:.4f}, Avg PPL: {avg_perplexity:.4f}")
 
         finally:
+            progress_bar.close()
             self.model.train()
 
     @staticmethod

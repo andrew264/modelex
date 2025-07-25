@@ -25,6 +25,9 @@ dependencies = [
     "tensorboard",
     "torchao"
 ]
+[project.optional-dependencies]
+serve = ["fastapi", "uvicorn"]
+benchmark = ["seaborn", "matplotlib", "tabulate"]
 
 [project.urls]
 Repository = "https://github.com/andrew264/modelex.git"
