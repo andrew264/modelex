@@ -30,7 +30,7 @@ This class accepts the following arguments:
 
 - `path`: Path to the json files
 - `tokenizer_path`: Path to the tokenizer.json file.
-- `chat_format`: Chat format to use ["llama3", "gemma2", "chatml"]
+- `chat_format`: Chat format to use ["llama3", "chatml", "custom"]
 - `has_reasoning`: boolean value. weather to use reasoning tokens, must be in the JSON files with `reasoning` key
 
 ## Train Models

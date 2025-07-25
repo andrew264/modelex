@@ -40,13 +40,6 @@ class Llama3Format(ChatFormat):
     SH: str = '<|start_header_id|>'
     EH: str = '<|end_header_id|>\n\n'
 
-class Gemma2Format(ChatFormat):
-    """Gemma 2 specific chat format."""
-    BOT: str = '<bos>'
-    EOT: str = '<end_of_turn>'
-    SH: str = '<start_of_turn>'
-    EH: str = '\n'
-
 class CustomFormat(ChatFormat):
     """Custom chat format."""
     BOT: str = ''
@@ -61,27 +54,16 @@ class ChatMLFormat(ChatFormat):
     SH: str = '<|im_start|>'
     EH: str = '\n'
 
-class GraniteFormat(ChatFormat):
-    """Granite specific format."""
-    BOT: str = ''
-    EOT: str = '<|end_of_text|>\n'
-    SH: str = '<|start_of_role|>'
-    EH: str = '<|end_of_role|>'
-
 class ChatFormatType(StrEnum):
     LLAMA3 = 'llama3'
-    GEMMA2 = 'gemma2'
     CUSTOM = 'custom'
     CHATML = 'chatml'
-    GRANITE = 'granite'
 
 class ChatFormatFactory:
     _formats: Dict[ChatFormatType, Type[ChatFormat]] = {
         ChatFormatType.LLAMA3: Llama3Format,
-        ChatFormatType.GEMMA2: Gemma2Format,
         ChatFormatType.CUSTOM: CustomFormat,
         ChatFormatType.CHATML: ChatMLFormat,
-        ChatFormatType.GRANITE: GraniteFormat,
     }
 
     @classmethod
