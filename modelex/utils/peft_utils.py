@@ -1,23 +1,23 @@
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 
 def _get_lora_modules(state_dict: Dict[str, Any]) -> Set[str]:
     lora_keys = [k for k in state_dict.keys() if "lora" in k or "magnitude" in k]
     return set([k.replace(".lora_a.weight", "").replace(".lora_b.weight", "").replace(".magnitude", "") for k in lora_keys])
 
 @torch.no_grad()
-def get_merged_lora_ckpt(state_dict: Dict[str, Any], rank: int, alpha: float, ) -> Dict[str, Any]:
+def get_merged_lora_ckpt(state_dict: Dict[str, Tensor], rank: int, alpha: float, ) -> Dict[str, Tensor]:
     lora_modules = _get_lora_modules(state_dict)
     for module in lora_modules:
-        lora_a_weight = state_dict[f"{module}.lora_a.weight"]
-        lora_b_weight = state_dict[f"{module}.lora_b.weight"]
-        lora_magnitude = state_dict.get(f"{module}.magnitude", None)
+        lora_a_weight: Tensor = state_dict[f"{module}.lora_a.weight"]
+        lora_b_weight: Tensor = state_dict[f"{module}.lora_b.weight"]
+        lora_magnitude: Optional[Tensor] = state_dict.get(f"{module}.magnitude", None)
 
         # If magnitude is present, calculate merged DoRA weight
         if lora_magnitude is not None:
-            base_weight = state_dict[f"{module}.weight"].to(lora_a_weight.dtype)
+            base_weight = state_dict[f"{module}.weight"].to(dtype=lora_a_weight.dtype)
             lora_weight = (alpha / rank) * lora_b_weight @ lora_a_weight
             merged_weight = base_weight + lora_weight
             weight_norm = torch.linalg.norm(base_weight + lora_weight, dim=1)
@@ -27,7 +27,7 @@ def get_merged_lora_ckpt(state_dict: Dict[str, Any], rank: int, alpha: float, ) 
             del state_dict[f"{module}.magnitude"]
         # Otherwise it is just vanilla LoRA
         else:
-            state_dict[f"{module}.weight"] += (alpha / rank) * lora_b_weight @ lora_a_weight
+            state_dict[f"{module}.weight"] = state_dict[f"{module}.weight"] + (alpha / rank) * lora_b_weight @ lora_a_weight
         del state_dict[f"{module}.lora_a.weight"]
         del state_dict[f"{module}.lora_b.weight"]
 

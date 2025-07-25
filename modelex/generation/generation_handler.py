@@ -81,7 +81,7 @@ class ModelGenerationHandler:
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found at {config_path}")
 
-        with self.device, set_default_dtype(torch.bfloat16):
+        with torch.device('cpu'), set_default_dtype(torch.bfloat16):
             model = create_model(config_path, skip_peft=True)  # always skip initializing peft stuff cuz we merge the adapter weights
         self.cfg = model.cfg.load_config(config_path)  # load cfg with peft parameters
         logger.info(f'{self.cfg.type} loaded')
@@ -91,8 +91,8 @@ class ModelGenerationHandler:
         if not model_files:
             raise FileNotFoundError(f"Model files not found in {self.path}")
 
-        model_sd = self._load_state_dict(model_files)
-        logger.info(f'loaded state_dict')
+        model_sd = self._get_state_dict(model_files)
+        logger.info(f'found state_dict')
 
         # Handle PEFT adapters if present
         adapter_sd = {}
@@ -101,21 +101,21 @@ class ModelGenerationHandler:
 
         if peft_config and adapter_path.exists():
             logger.info(f'found adapter weights at {adapter_path}')
-            adapter_sd = get_state_dict_from_safetensors(str(adapter_path), self.device)
+            adapter_sd = get_state_dict_from_safetensors(str(adapter_path), torch.device('cpu'))
         else:
             logger.info('no adapter weights found')
             self.cfg.peft = None
 
-        # Load state dict into model
-        model.load_state_dict(model_sd, strict=False)
-
         # Merge adapter weights
         if adapter_sd and peft_config:
             logger.info(f'merging adapter weights with base weights')
-            merged_sd = get_merged_lora_ckpt(model.state_dict() | adapter_sd, rank=peft_config.rank, alpha=peft_config.alpha)
-            model.load_state_dict(merged_sd, strict=False)
+            merged_sd = get_merged_lora_ckpt(model_sd | adapter_sd, rank=peft_config.rank, alpha=peft_config.alpha)
+            model.load_state_dict(merged_sd, strict=False, assign=True)
             self.cfg.peft = peft_config
             del merged_sd
+        else:  # Load state dict into model
+            logger.info('loading the state_dict into model')
+            model.load_state_dict(model_sd, strict=False, assign=True)
 
         # Clean up
         del model_sd, adapter_sd
@@ -130,7 +130,13 @@ class ModelGenerationHandler:
             from torchao.quantization import quantize_
             quant_cfg = get_quant_config(self.cfg.inference.quant_dtype)
             logger.info(f'applying {self.cfg.inference.quant_dtype} quantization to {self.cfg.type}')
-            quantize_(model.layers, quant_cfg, device=self.device)
+            quantize_(model, quant_cfg, device=self.device)
+
+        model = model.to(self.device)  # just to be sure
+
+        for n, p in model.named_parameters():
+            if p.device.type != self.device.type:
+                logger.warning(f'layer: {n} | device {p.device} is not in the right device {self.device}')
 
         self.model = model
 
@@ -138,7 +144,8 @@ class ModelGenerationHandler:
         if compiled:
             self._compile_model()
 
-    def _load_state_dict(self, model_files: List[Path]) -> Dict[str, Any]:
+    @staticmethod
+    def _get_state_dict(model_files: List[Path]) -> Dict[str, Any]:
         """
         Load state dict from safetensors files.
 

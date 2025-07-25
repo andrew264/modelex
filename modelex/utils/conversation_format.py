@@ -36,7 +36,7 @@ class ChatFormat:
 class Llama3Format(ChatFormat):
     """Llama 3 specific chat format."""
     BOT: str = '<|begin_of_text|>'
-    EOT: str = '<|eot_id|>\n'
+    EOT: str = '<|end_of_text|>\n'
     SH: str = '<|start_header_id|>'
     EH: str = '<|end_header_id|>\n\n'
 

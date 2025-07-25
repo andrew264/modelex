@@ -31,9 +31,12 @@ class LLMConfig(BaseModel):
     vocab_size: int = 32000
     hidden_size: int = 2048
     intermediate_size: int = 8192
+    tie_word_embeddings: bool = False
+
+    # Attention
     num_kv_heads: int = 8
     num_heads: int = 32
-    tie_word_embeddings: bool = False
+    no_rope_layers: list[int] = []
 
     # Misc configurations
     rms_norm_eps: float = 1e-05

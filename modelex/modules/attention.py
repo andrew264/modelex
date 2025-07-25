@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from modelex.models.llm.config import LLMConfig
 from modelex.modules.linears import linear_factory
 from modelex.utils import exists
 from modelex.utils.kv_cache import KVCache
@@ -20,7 +21,7 @@ def apply_rotary_pos_emb(q: Tensor, k: Tensor, cos: Tensor, sin: Tensor, unsquee
     return q_embed, k_embed
 
 class Attention(nn.Module):
-    def __init__(self, cfg, layer_idx: int, ):
+    def __init__(self, cfg: LLMConfig, layer_idx: int, ):
         super(Attention, self).__init__()
         self.cfg = cfg
         self.layer_idx = layer_idx
@@ -30,33 +31,20 @@ class Attention(nn.Module):
         self.head_dim = cfg.head_dim
         self.kv_hidden_size = cfg.num_kv_heads * self.head_dim
         self.num_kv_groups = cfg.num_heads // cfg.num_kv_heads
-        qkv_out_dim = cfg.hidden_size + 2 * self.kv_hidden_size
+        self.use_rope = layer_idx not in cfg.no_rope_layers
 
-        hidden = cfg.hidden_size
         kwargs = {}
         if hasattr(cfg, 'peft') and cfg.peft and 'attn' in cfg.peft.layers:
             kwargs = {'peft_type': cfg.peft.type, 'rank': cfg.peft.rank, 'alpha': cfg.peft.alpha, 'dropout': cfg.peft.dropout, 'quantize_base': cfg.peft.quantize_base}
 
-        self.qkv_proj = linear_factory(in_features=hidden, out_features=qkv_out_dim, bias=cfg.attn_qkv_bias, **kwargs)
-        self.o_proj = linear_factory(in_features=hidden, out_features=hidden, bias=cfg.attn_out_bias, **kwargs)
-        self._register_load_state_dict_pre_hook(self.fused_qkv_hook)
+        self.q_proj = linear_factory(in_features=self.hidden_size, out_features=self.hidden_size, bias=cfg.attn_qkv_bias, **kwargs)
+        self.k_proj = linear_factory(in_features=self.hidden_size, out_features=self.kv_hidden_size, bias=cfg.attn_qkv_bias, **kwargs)
+        self.v_proj = linear_factory(in_features=self.hidden_size, out_features=self.kv_hidden_size, bias=cfg.attn_qkv_bias, **kwargs)
+        self.o_proj = linear_factory(in_features=self.hidden_size, out_features=self.hidden_size, bias=cfg.attn_out_bias, **kwargs)
 
         self.cache_enabled = False
         self.kv_cache = None
         self.scaling = None
-
-    @staticmethod
-    def fused_qkv_hook(state_dict, prefix, *args, **kwargs):
-        if prefix + 'q_proj.weight' in state_dict:
-            q_weight = state_dict.pop(prefix + 'q_proj.weight')
-            k_weight = state_dict.pop(prefix + 'k_proj.weight')
-            v_weight = state_dict.pop(prefix + 'v_proj.weight')
-            state_dict[prefix + 'qkv_proj.weight'] = torch.cat([q_weight, k_weight, v_weight])
-        if prefix + 'q_proj.bias' in state_dict:
-            q_bias = state_dict.pop(prefix + 'q_proj.bias')
-            k_bias = state_dict.pop(prefix + 'k_proj.bias')
-            v_bias = state_dict.pop(prefix + 'v_proj.bias')
-            state_dict[prefix + 'qkv_proj.bias'] = torch.cat([q_bias, k_bias, v_bias])
     def caches_are_setup(self) -> bool: return exists(self.kv_cache)
     def setup_cache(self, batch_size: int, dtype: torch.dtype, max_seq_len: int) -> None:
         if self.caches_are_setup(): print("Key value caches are already setup. You cannot call ``setup_caches()`` twice. Skipping.")
@@ -72,12 +60,12 @@ class Attention(nn.Module):
         bsz, seqlen, _ = x.size()
         is_causal = attn_mask is None and seqlen > 1
 
-        q, k, v = self.qkv_proj(x).split([self.hidden_size, self.kv_hidden_size, self.kv_hidden_size], dim=2)
-        q = q.view(bsz, seqlen, self.num_heads, self.head_dim)
-        k = k.view(bsz, seqlen, self.num_kv_heads, self.head_dim)
-        v = v.view(bsz, seqlen, self.num_kv_heads, self.head_dim)
-        q, k, v = map(lambda x: x.transpose(1, 2), (q, k, v))
-        q, k = apply_rotary_pos_emb(q, k, *freqs)
+        q = self.q_proj(x).view(bsz, seqlen, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k_proj(x).view(bsz, seqlen, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.v_proj(x).view(bsz, seqlen, self.num_kv_heads, self.head_dim).transpose(1, 2)
+
+        if self.use_rope:
+            q, k = apply_rotary_pos_emb(q, k, *freqs)
 
         if self.cache_enabled: k, v = self.kv_cache(k, v)
 

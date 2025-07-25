@@ -27,7 +27,7 @@ class ModelAPI:
         self.compile = _compile
 
     def setup(self, device: str):
-        logger.info('stating model setup')
+        logger.info('starting model setup')
         self.device = device
         self.model_handler = ModelGenerationHandler(self.path, self.device)
         self.model_handler.load_model(compiled=self.compile)
