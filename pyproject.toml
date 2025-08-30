@@ -12,15 +12,16 @@ authors = [
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
+    "fastapi>=0.116.1",
     "pydantic>=2.11.7",
-    "ruff>=0.12.9",
     "safetensors>=0.6.2",
     "tensorboard>=2.20.0",
-    "tokenizers>=0.21.4",
+    "tokenizers>=0.22.0",
     "torch>=2.8.0",
     "torchao>=0.12.0",
     "torchtune>=0.6.1",
-    "tqdm>=4.66.5",
+    "tqdm>=4.67.1",
+    "uvicorn>=0.35.0",
 ]
 #dependencies = [
 #    "numpy",
@@ -39,10 +40,14 @@ serve = [
     "fastapi>=0.116.1",
     "uvicorn>=0.35.0",
 ]
+cce = [
+    "cut-cross-entropy",
+]
 
-#[[tool.uv.index]]
-#name = "pytorch"
-#url = "https://download.pytorch.org/whl/cu129"
+[dependency-groups]
+lint = [
+    "ruff>=0.12.11",
+]
 
 [tool.ruff]
 line-length=180
@@ -52,7 +57,5 @@ quote-style = "double"
 indent-style = "space"
 docstring-code-line-length = "dynamic"
 
-[dependency-groups]
-lint = [
-    "ruff>=0.12.9",
-]
+[tool.uv.sources]
+cut-cross-entropy = { git = "https://github.com/apple/ml-cross-entropy.git" }
