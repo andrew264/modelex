@@ -4,5 +4,6 @@
 /.vscode
 /plots
 /*.egg-info
+/experiments
 
 *.pyc

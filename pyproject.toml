@@ -12,25 +12,47 @@ authors = [
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
-    "torch",
-    "safetensors",
-    "fastapi",
-    "uvicorn",
-    "torchtune",
-    "tokenizers",
-    "numpy",
-    "tqdm",
-    "pydantic",
-    "pyarrow",
-    "tensorboard",
-    "torchao"
+    "pydantic>=2.11.7",
+    "ruff>=0.12.9",
+    "safetensors>=0.6.2",
+    "tensorboard>=2.20.0",
+    "tokenizers>=0.21.4",
+    "torch>=2.8.0",
+    "torchao>=0.12.0",
+    "torchtune>=0.6.1",
+    "tqdm>=4.66.5",
 ]
-[project.optional-dependencies]
-serve = ["fastapi", "uvicorn"]
-benchmark = ["seaborn", "matplotlib", "tabulate"]
+#dependencies = [
+#    "numpy",
+#    "pyarrow",
+#]
+#benchmark = ["seaborn", "matplotlib", "tabulate"]
 
 [project.urls]
 Repository = "https://github.com/andrew264/modelex.git"
 
 [project.scripts]
 modelex = "modelex:main"
+
+[project.optional-dependencies]
+serve = [
+    "fastapi>=0.116.1",
+    "uvicorn>=0.35.0",
+]
+
+#[[tool.uv.index]]
+#name = "pytorch"
+#url = "https://download.pytorch.org/whl/cu129"
+
+[tool.ruff]
+line-length=180
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-line-length = "dynamic"
+
+[dependency-groups]
+lint = [
+    "ruff>=0.12.9",
+]
