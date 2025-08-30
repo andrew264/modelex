@@ -31,7 +31,7 @@ class Attention(nn.Module):
         self.head_dim = cfg.head_dim
         self.kv_hidden_size = cfg.num_kv_heads * self.head_dim
         self.num_kv_groups = cfg.num_heads // cfg.num_kv_heads
-        self.use_rope = layer_idx not in cfg.no_rope_layers
+        self.use_rope = layer_idx in cfg.rope_layers if cfg.rope_layers else True
 
         kwargs = {}
         if hasattr(cfg, 'peft') and cfg.peft and 'attn' in cfg.peft.layers:

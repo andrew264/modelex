@@ -36,7 +36,7 @@ class LLMConfig(BaseModel):
     # Attention
     num_kv_heads: int = 8
     num_heads: int = 32
-    no_rope_layers: list[int] = []
+    rope_layers: Optional[list[int]] = None
 
     # Misc configurations
     rms_norm_eps: float = 1e-05
