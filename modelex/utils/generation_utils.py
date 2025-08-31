@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Generator, List, Optional
 
 import torch
 from torch import Tensor
@@ -129,3 +129,67 @@ def generate(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_i
     if stop_tokens is not None:
         generated_tokens *= stop_token_mask
     return generated_tokens
+
+@torch.no_grad()
+def generate_stream(model: BaseLLM, prompt: Tensor, *, max_generated_tokens: int, pad_id: int = 0, temperature: float = 1.0, top_k: Optional[int] = None,
+                    top_p: Optional[float] = None, stop_tokens: Optional[List[int]] = None, rng: Optional[torch.Generator] = None, ) -> Generator[Tensor, None, None]:
+    torch.cuda.empty_cache()
+    prompt = prompt.view(1, -1) if prompt.ndim == 1 else prompt
+
+    bsz, prompt_length = prompt.size()
+    total_response_length = prompt_length + max_generated_tokens
+
+    generated_tokens = prompt.clone()
+    incremental_decoding = model.caches_are_enabled()
+
+    max_seq_len = (total_response_length if not incremental_decoding else model.decoder_max_cache_seq_len)
+    padding_masks = generated_tokens != pad_id
+
+    if not padding_masks.all():
+        padding_masks = torch.nn.functional.pad(padding_masks, (0, max_generated_tokens), value=True)
+        masks = get_causal_mask_from_padding_mask(padding_masks, target_seq_len=max_seq_len)
+        input_pos = get_position_ids_from_padding_mask(padding_masks)
+    else:
+        masks = torch.tril(torch.ones(total_response_length, max_seq_len, dtype=torch.bool, device=prompt.device, )).unsqueeze(0)
+        input_pos = torch.arange(0, total_response_length, device=generated_tokens.device).unsqueeze(0)
+
+    if incremental_decoding: curr_masks = masks[:, :prompt_length]
+    else: curr_masks = masks[:, :prompt_length, :prompt_length]
+
+    q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
+    tokens = generate_next_token(model, input_pos=input_pos[:, :prompt_length], mask=curr_masks, x=prompt,
+                                                   temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
+    yield tokens
+    generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
+    curr_pos = prompt_length
+
+    stop_token_reached = torch.zeros(bsz, dtype=torch.bool, device=prompt.device)
+    stop_tokens = (torch.tensor(stop_tokens, device=prompt.device, dtype=tokens.dtype) if stop_tokens else None)
+    stop_token_mask = torch.ones((bsz, prompt_length + 1), dtype=torch.int32, device=prompt.device)
+
+    if stop_tokens is not None:
+        stop_token_reached = update_stop_tokens_tracker(tokens, stop_tokens, stop_token_reached)
+        if stop_token_reached.all().item(): return
+
+    for _ in range(max_generated_tokens - 1):
+        if stop_tokens is not None:
+            stop_token_mask = torch.cat([stop_token_mask, ~stop_token_reached.reshape(bsz, 1)], dim=-1)
+        if incremental_decoding:
+            curr_input_pos = input_pos[:, curr_pos]
+            curr_masks = masks[:, curr_pos, None, :]
+        else:
+            tokens = generated_tokens.clone()
+            curr_input_pos = input_pos[:, : curr_pos + 1]
+            curr_masks = masks[:, : curr_pos + 1, : curr_pos + 1]
+
+        q = torch.empty((bsz, model.tok_embeddings.num_embeddings), device=prompt.device).exponential_(1, generator=rng)
+        tokens = generate_next_token(model, input_pos=curr_input_pos.unsqueeze(0), x=tokens, mask=curr_masks, temperature=temperature, top_k=top_k, top_p=top_p, q=q, )
+        yield tokens
+        generated_tokens = torch.cat([generated_tokens, tokens], dim=-1)
+        curr_pos += 1
+
+        if stop_tokens is not None:
+            stop_token_reached = update_stop_tokens_tracker(tokens, stop_tokens, stop_token_reached)
+            if stop_token_reached.all(): break
+    if stop_tokens is not None:
+        generated_tokens *= stop_token_mask

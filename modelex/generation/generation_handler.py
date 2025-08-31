@@ -2,14 +2,14 @@ import gc
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 import torch
 from tokenizers import Tokenizer
 
 from modelex.models.registry import create_model
 from modelex.utils import convert_hf_state_dict, exists, get_state_dict_from_safetensors, has_hf_keys, set_default_dtype
-from modelex.utils.generation_utils import generate
+from modelex.utils.generation_utils import generate, generate_stream
 from modelex.utils.peft_utils import get_merged_lora_ckpt
 
 logger = logging.getLogger(__name__)
@@ -185,23 +185,6 @@ class ModelGenerationHandler:
                  skip_special_tokens: bool = True) -> Tuple[Union[str, List[int]], int, int, float]:
         """
         Generate text from a prompt.
-
-        Args:
-            prompt: Input prompt as string or token IDs
-            max_new_tokens: Maximum number of new tokens to generate
-            return_tokens: Whether to return token IDs instead of decoded text
-            skip_special_tokens: Whether to skip special tokens when decoding
-
-        Returns:
-            Tuple containing:
-                - Generated text or tokens
-                - Number of new tokens generated
-                - Total number of tokens (input + output)
-                - Time taken for generation in seconds
-
-        Raises:
-            RuntimeError: If model is not loaded
-            ValueError: If string prompt is provided but tokenizer is not available
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Call load_model() first.")
@@ -255,6 +238,56 @@ class ModelGenerationHandler:
         decoded = self.tokenizer.decode(new_tokens, skip_special_tokens=skip_special_tokens)
         torch.cuda.empty_cache()
         return decoded, len(new_tokens), total_tokens, generation_time
+
+    def generate_stream(self, prompt: Union[str, List[int]], max_new_tokens: Optional[int] = 512, return_tokens: bool = False,
+                        skip_special_tokens: bool = True) -> Generator[Union[str, List[int]], None, None]:
+        if self.model is None:
+            raise RuntimeError("Model not loaded. Call load_model() first.")
+
+        # Reset model cache
+        self.model.reset_cache()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # Tokenize prompt
+        if isinstance(prompt, str):
+            if self.tokenizer is None:
+                raise ValueError("Tokenizer not loaded but string prompt provided")
+
+            encoded = self.tokenizer.encode(prompt, add_special_tokens=False)
+            encoded_len = len(encoded.ids)
+            tokens = torch.tensor([encoded.ids], device=self.device, dtype=torch.int64)
+        else:
+            tokens = torch.tensor([prompt], device=self.device, dtype=torch.int64)
+            encoded_len = len(prompt)
+
+        # Ensure prompt doesn't exceed max context length
+        max_context_len = self.model.cfg.max_seq_len
+        available_tokens = max_context_len - encoded_len
+
+        if available_tokens < max_new_tokens:
+            truncate_to = max_context_len - max_new_tokens
+            if truncate_to > 0:
+                tokens = tokens[:, -truncate_to:]
+                encoded_len = tokens.size(1)
+            else:
+                max_new_tokens = available_tokens
+
+        generation_config = self._prepare_generation_config(max_new_tokens)
+
+        for out in generate_stream(self.model, tokens, **generation_config):
+            new_tokens = out[0].tolist()
+
+            if return_tokens:
+                yield new_tokens
+
+            # Decode text
+            if self.tokenizer is None:
+                raise ValueError("Tokenizer not loaded but text output requested")
+
+            decoded = self.tokenizer.decode(new_tokens, skip_special_tokens=skip_special_tokens)
+            torch.cuda.empty_cache()
+            yield decoded
 
     def _prepare_generation_config(self, max_new_tokens: int) -> Dict[str, Any]:
         """

@@ -51,12 +51,14 @@ def main(args):
             prompt.reset()
             continue
         prompt.add_msg(args.name, [{"type": "text", "text": inp}])
-        decoded, num_tokens, _, generation_time = model_handler.generate(prompt.get_prompt_for_completion(), skip_special_tokens=False)
-        if isinstance(decoded, str):
-            prompt.add_msg(args.botname, [{"type": "text", "text": decoded}])
+        decoded = ""
+        print(f"{args.botname}:", end="", flush=True)
+        for text in model_handler.generate_stream(prompt.get_prompt_for_completion(), skip_special_tokens=False):
+            print(text, end="", flush=True)
+            decoded += text
+        print()
+        prompt.add_msg(args.botname, [{"type": "text", "text": decoded}])
 
-        print(f"{args.botname}: {decoded}")
-        print(f"Generated {num_tokens} tokens in {generation_time:.3f}s ({num_tokens / generation_time:.3f} tokens/s)")
 
 if __name__ == '__main__':
     main(args=parser.parse_args())
