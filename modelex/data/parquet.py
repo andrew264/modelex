@@ -17,9 +17,11 @@ class ParquetCustomDataReader(Dataset):
         for i in range(len(self)): yield self[i]
 
 class ParquetTextDataset:
-    def __init__(self, path: str, tokenizer_path: Optional[str] = None) -> None:
+    def __init__(self, path: str, tokenizer_path: Optional[str] = None, bos_id: Optional[list[int]] = None, eos_id: Optional[list[int]] = None) -> None:
         self._tokenizer = Tokenizer.from_file(tokenizer_path) if tokenizer_path else None
         self.parquet_files = glob.glob(f"{path}/**/*.parquet", recursive=True)
+        self.bos_id = bos_id
+        self.eos_id = eos_id
         self.file_row_counts = []
         self.total_rows = 0
         self.cumulative_rows = [0]
@@ -49,8 +51,10 @@ class ParquetTextDataset:
         text: str = row_group.to_pandas().iloc[row_in_group].text
         if self._tokenizer is not None:
             tokenized = self._tokenizer.encode(text)
-            ids = np.array(tokenized.ids, dtype=np.int32)
-            return {'input_ids': ids, 'labels': ids}
+            ids = tokenized.ids if self.bos_id is None else self.bos_id + tokenized.ids
+            ids = ids if self.eos_id is None else ids + self.eos_id
+            ids_np = np.array(ids, dtype=np.int32)
+            return {'input_ids': ids_np, 'labels': ids_np}
         return text
 
     def _binary_search(self, index):
