@@ -12,15 +12,13 @@ authors = [
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
-    "fastapi>=0.116.1",
-    "pydantic>=2.11.7",
+    "pydantic>=2.11.9",
     "safetensors>=0.6.2",
-    "tokenizers>=0.22.0",
+    "tokenizers>=0.22.1",
     "torch>=2.8.0",
     "torchao>=0.13.0",
     "torchtune>=0.6.1",
     "tqdm>=4.67.1",
-    "uvicorn>=0.35.0",
 ]
 #dependencies = [
 #    "numpy",
@@ -34,20 +32,21 @@ Repository = "https://github.com/andrew264/modelex.git"
 [project.scripts]
 modelex = "modelex:main"
 
-[project.optional-dependencies]
-serve = [
-    "fastapi>=0.116.1",
-    "uvicorn>=0.35.0",
-]
-
 [dependency-groups]
+serve = [
+    "fastapi>=0.117.1",
+    "uvicorn>=0.37.0",
+]
 lint = [
-    "ruff>=0.13.0",
+    "ruff>=0.13.2",
 ]
 training = [
     "bitsandbytes>=0.47.0",
     "tensorboard>=2.20.0",
     "cut-cross-entropy",
+]
+datareaders = [
+    "h5py>=3.14.0",
 ]
 
 [tool.ruff]
