@@ -7,15 +7,15 @@ data:
   num_workers: 4
   pin_memory: true
   train_dataset:
-    class_path: modelex.data.ParquetCustomDataReader
+    class_path: modelex.data.hdf5.H5Dataset
     max_steps: null
     params:
-      path: /path/to/ft_train.parquet
+      path: /path/to/ft_train.h5
   valid_dataset:
-    class_path: modelex.data.ParquetCustomDataReader
+    class_path: modelex.data.hdf5.H5Dataset
     max_steps: null
     params:
-      path: /path/to/ft_valid.parquet
+      path: /path/to/ft_valid.h5
 logging:
   log_frequency: 1
   save_frequency: 1

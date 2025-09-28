@@ -8,30 +8,7 @@ pip install git+https://github.com/andrew264/modelex.git
 
 ## Create Tokenized Dataset
 
-To tokenize and save the dataset into a Parquet file, run:
-
-```bash
-modelex prepare_dataset --file {outputfile.parquet} --datasets classname:arg1,arg2
-```
-
-### Example Class: `modelex.data.Conversations`
-
-This class accepts the following arguments:
-
-- `data_path`: A directory containing a collection of JSON files with the format:
-  
-    ```json
-    [
-        {"role": "user", "content": [{"type":  "text", "text":"message from user"}]},
-        {"role": "assistant", "content": [{"type":  "reason", "text":"reasoning for the query"}, {"type":  "text", "text":"reply to user"}]},
-        ...
-    ]
-    ```
-
-- `path`: Path to the json files
-- `tokenizer_path`: Path to the tokenizer.json file.
-- `chat_format`: Chat format to use ["llama3", "chatml", "custom"]
-- `has_reasoning`: boolean value. weather to use reasoning tokens, must be in the JSON files with `reasoning` key
+moved tokenization to [this repo](https://github.com/andrew264/conv_editor)
 
 ## Train Models
 
