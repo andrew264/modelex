@@ -41,11 +41,6 @@ class ModelGenerationHandler:
         self._is_compiled = False
 
     @property
-    def prompt_format(self) -> str:
-        """Get the chat format from the inference config."""
-        return self.cfg.inference.chat_format if hasattr(self.cfg, 'inference') and exists(self.cfg.inference) else ""
-
-    @property
     def is_loaded(self) -> bool:
         """Check if the model is loaded."""
         return self.model is not None

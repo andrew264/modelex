@@ -9,7 +9,6 @@ class InferenceConfig(BaseModel):
     pad_token: int = 0
 
     precision: Literal['bf16', 'fp16', 'fp32'] = 'bf16'
-    chat_format: str = 'chatml'
 
     top_k: Optional[int] = Field(None, ge=1)
     top_p: Optional[float] = Field(None, ge=0.0, le=1.0)

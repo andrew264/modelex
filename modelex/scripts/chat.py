@@ -7,7 +7,7 @@ import sys
 import torch
 
 from modelex.generation import ModelGenerationHandler
-from modelex.utils.conversation_format import ConversationFormatter
+from modelex.utils.conversation_format import ConversationFormatter, TextContent, TextSegment
 
 torch.set_float32_matmul_precision('high')
 
@@ -42,23 +42,24 @@ def main(args):
     dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
     with open(os.path.join(args.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: sysprompt = f.read().format(datetime=dt).strip()
 
-    prompt = ConversationFormatter(args.botname, chat_format=model_handler.prompt_format).add_msg('system', [{"type": "text", "text": sysprompt}])
+    prompt = ConversationFormatter(assistant_name=args.botname)
+    prompt.add_msg('system', [TextContent(segments=[TextSegment(text=sysprompt)])])
 
     while True:
         inp = multiline_input(args.name)
         if inp == '': break
         if inp.casefold() == 'reset':
             prompt.reset()
+            prompt.add_msg('system', [TextContent(segments=[TextSegment(text=sysprompt)])])
             continue
-        prompt.add_msg(args.name, [{"type": "text", "text": inp}])
+        prompt.add_msg(args.name, [TextContent(segments=[TextSegment(text=inp)])])
         decoded = ""
         print(f"{args.botname}:", end="", flush=True)
         for text in model_handler.generate_stream(prompt.get_prompt_for_completion(), skip_special_tokens=False):
             print(text, end="", flush=True)
             decoded += text
         print()
-        prompt.add_msg(args.botname, [{"type": "text", "text": decoded}])
-
+        prompt.add_msg(args.botname, [TextContent(segments=[TextSegment(text=decoded)])])
 
 if __name__ == '__main__':
     main(args=parser.parse_args())

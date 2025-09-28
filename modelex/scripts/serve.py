@@ -34,7 +34,7 @@ class ModelAPI:
 
     def __call__(self, request: dict) -> dict:
         assistant_name = request.get("assistant_name", "assistant")
-        p = ConversationFormatter(assistant_name=assistant_name, chat_format=self.model_handler.prompt_format, ).add_msgs(request["messages"])
+        p = ConversationFormatter(assistant_name=assistant_name).add_msgs(request["messages"])
         output_text, _, length, _ = self.model_handler.generate(p.get_prompt_for_completion(), max_new_tokens=1024)
         return {"response": output_text, "cur_length": length, "max_length": self.model_handler.cfg.max_seq_len, }
 
