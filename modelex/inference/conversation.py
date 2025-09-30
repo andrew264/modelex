@@ -3,24 +3,6 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
 
 from pydantic import BaseModel, Field
 
-class TextSegment(BaseModel):
-    text: str
-    learnable: bool = True
-
-class TextContent(BaseModel):
-    type: Literal["text"] = "text"
-    segments: List[TextSegment]
-    @property
-    def full_text(self) -> str:
-        return "".join(s.text for s in self.segments)
-
-class ReasoningContent(BaseModel):
-    type: Literal["reason"] = "reason"
-    segments: List[TextSegment]
-    @property
-    def full_text(self) -> str:
-        return "".join(s.text for s in self.segments)
-
 class FunctionParameters(BaseModel):
     type: Literal["object"] = "object"
     properties: Dict[str, Any]
@@ -55,18 +37,28 @@ class ToolResultsContent(BaseModel):
     type: Literal["tool_response"] = "tool_response"
     results: List[ToolResult]
 
-ContentItem = Annotated[Union[TextContent, ReasoningContent, ToolsContent, ToolCallContent, ToolResultsContent,], Field(discriminator="type"),]
+class InferenceTextContent(BaseModel):
+    type: Literal["text"] = "text"
+    text: str
 
-class Item(BaseModel):
+class InferenceReasoningContent(BaseModel):
+    type: Literal["reason"] = "reason"
+    text: str
+
+InferenceContentItem = Annotated[
+    Union[InferenceTextContent, InferenceReasoningContent, ToolsContent, ToolCallContent, ToolResultsContent,], Field(discriminator="type"),]
+
+class InferenceItem(BaseModel):
     role: str
-    content: List[ContentItem]
+    content: List[InferenceContentItem]
 
-ConversationData = List[Item]
+InferenceConversationData = List[InferenceItem]
 
 DEFAULT_TOKENS = {"bos": "<|begin_of_text|>", "eot": "<|eot_id|>", "header_start": "<|start_header_id|>", "header_end": "<|end_header_id|>",
-    "think_start": "<think>", "think_end": "</think>", "tools_start": "<tools>", "tools_end": "</tools>", "tool_call_start": "<tool_call>",
-    "tool_call_end": "</tool_call>", "tool_response_start": "<tool_response>", "tool_response_end": "</tool_response>",
-}
+                  "think_start": "<think>", "think_end": "</think>", "tools_start": "<tools>", "tools_end": "</tools>",
+                  "tool_call_start": "<tool_call>", "tool_call_end": "</tool_call>", "tool_response_start": "<tool_response>",
+                  "tool_response_end": "</tool_response>",
+                  }
 
 class ConversationFormatter:
     def __init__(self, assistant_name: str = "assistant", special_tokens: Optional[Dict[str, str]] = None, json_indent: Optional[int] = 0,
@@ -76,7 +68,7 @@ class ConversationFormatter:
         self.with_reason = with_reason
         self.tokens = DEFAULT_TOKENS.copy()
         if special_tokens: self.tokens.update(special_tokens)
-        self.msgs: ConversationData = []
+        self.msgs: InferenceConversationData = []
     def _serialize_tools(self, content: ToolsContent) -> str:
         try:
             definitions_as_dicts = [d.model_dump(exclude_none=True) for d in content.definitions]
@@ -104,13 +96,13 @@ class ConversationFormatter:
     def __str__(self) -> str:
         parts = [self.tokens["bos"]]
         for item in self.msgs:
-            header = f"{self.tokens['header_start']}{item.role}{self.tokens['header_end']}\n\n"
+            header = f"\n{self.tokens['header_start']}{item.role}{self.tokens['header_end']}\n"
             turn_content_parts = []
             for content_part in item.content:
-                if isinstance(content_part, TextContent): turn_content_parts.append(content_part.full_text)
-                elif isinstance(content_part, ReasoningContent):
+                if isinstance(content_part, InferenceTextContent): turn_content_parts.append(content_part.text)
+                elif isinstance(content_part, InferenceReasoningContent):
                     if self.with_reason:
-                        think_block = f"{self.tokens['think_start']}{content_part.full_text}{self.tokens['think_end']}"
+                        think_block = f"{self.tokens['think_start']}{content_part.text}{self.tokens['think_end']}"
                         turn_content_parts.append(think_block)
                 elif isinstance(content_part, ToolsContent): turn_content_parts.append(self._serialize_tools(content_part))
                 elif isinstance(content_part, ToolCallContent): turn_content_parts.append(self._serialize_tool_calls(content_part))
@@ -119,10 +111,10 @@ class ConversationFormatter:
             turn_string = f"{header}{full_turn_content}\n{self.tokens['eot']}"
             parts.append(turn_string)
         return "".join(parts)
-    def add_msg(self, role: str, content: List[ContentItem]) -> Self:
-        self.msgs.append(Item(role=role, content=content))
+    def add_msg(self, role: str, content: List[InferenceContentItem]) -> Self:
+        self.msgs.append(InferenceItem(role=role, content=content))
         return self
-    def add_msgs(self, msgs: ConversationData) -> Self:
+    def add_msgs(self, msgs: InferenceConversationData) -> Self:
         self.msgs.extend(msgs)
         return self
     def reset(self) -> Self:

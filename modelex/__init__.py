@@ -1,5 +1,7 @@
 import argparse
+import asyncio
 import importlib
+import inspect
 import os
 import sys
 
@@ -19,10 +21,17 @@ def main():
         if not hasattr(module, 'main'):
             print(f"Error: {args.subcommand} does not have a main() function")
             sys.exit(1)
+
+        main_func = module.main
+        is_async = inspect.iscoroutinefunction(main_func)
+
         if hasattr(module, 'parser'):
-            module.main(args=module.parser.parse_args(unknown))
+            parsed_args = module.parser.parse_args(unknown)
+            if is_async: asyncio.run(main_func(args=parsed_args))
+            else: main_func(args=parsed_args)
         else:
-            module.main()
+            if is_async: asyncio.run(main_func())
+            else: main_func()
 
     except ImportError as e:
         print(f"Error: {args.subcommand} not found\n", e)
@@ -32,6 +41,5 @@ def main():
         raise e
 
 if __name__ == '__main__':
-    # Reduce VRAM usage by reducing fragmentation
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     main()

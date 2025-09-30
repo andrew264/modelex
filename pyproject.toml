@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=80"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -34,14 +34,14 @@ modelex = "modelex:main"
 
 [dependency-groups]
 serve = [
-    "fastapi>=0.117.1",
+    "fastapi>=0.118.0",
     "uvicorn>=0.37.0",
 ]
 lint = [
     "ruff>=0.13.2",
 ]
 training = [
-    "bitsandbytes>=0.47.0",
+    "bitsandbytes>=0.48.0",
     "tensorboard>=2.20.0",
     "cut-cross-entropy",
 ]

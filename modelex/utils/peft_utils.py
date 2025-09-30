@@ -25,8 +25,7 @@ def get_merged_lora_ckpt(state_dict: Dict[str, Tensor], rank: int, alpha: float,
             merged_weight *= mag_norm_scale
             state_dict[f"{module}.weight"] = merged_weight
             del state_dict[f"{module}.magnitude"]
-        # Otherwise it is just vanilla LoRA
-        else:
+        else: # Otherwise it is just vanilla LoRA
             state_dict[f"{module}.weight"] = state_dict[f"{module}.weight"] + (alpha / rank) * lora_b_weight @ lora_a_weight
         del state_dict[f"{module}.lora_a.weight"]
         del state_dict[f"{module}.lora_b.weight"]

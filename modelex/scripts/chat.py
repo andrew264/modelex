@@ -1,25 +1,26 @@
 import argparse
 import datetime
+import json
 import logging
-import os
 import sys
 
-import torch
+try:
+    import requests
+except ImportError:
+    print("The 'requests' package is required. Please install it with 'uv add requests'", file=sys.stderr)
+    sys.exit(1)
 
-from modelex.generation import ModelGenerationHandler
-from modelex.utils.conversation_format import ConversationFormatter, TextContent, TextSegment
-
-torch.set_float32_matmul_precision('high')
+from modelex.inference.conversation import InferenceItem, InferenceTextContent
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[logging.StreamHandler(sys.stdout)])
 logger = logging.getLogger(__name__)
 
-parser = argparse.ArgumentParser(description="generate sequence")
-parser.add_argument("path", type=str, help="Path to the models (required)")
-parser.add_argument("--device", type=str, default="cuda", help="Device to run the models on (optional, defaults to 'cuda')")
-parser.add_argument("--name", type=str, default="user", help="Username (optional, defaults to 'user')")
-parser.add_argument("--botname", type=str, default="assistant", help="Username (optional, defaults to 'assistant')")
-parser.add_argument("--compile", action="store_true", help="Enable torch compile (optional, defaults to False)")
+parser = argparse.ArgumentParser(description="Chat with a served Modelex model via its API endpoint.")
+parser.add_argument("--host", type=str, default="localhost", help="Host of the inference server (default: localhost)")
+parser.add_argument("--port", type=int, default=6969, help="Port of the inference server (default: 6969)")
+parser.add_argument("--sysprompt", type=str, default="sysprompt.txt", help="Path to the system prompt file (optional, default: sysprompt.txt).")
+parser.add_argument("--name", type=str, default="user", help="Your username (optional, default: 'user')")
+parser.add_argument("--botname", type=str, default="assistant", help="The assistant's name (optional, default: 'assistant')")
 
 def multiline_input(name: str = 'User'):
     lines = []
@@ -35,31 +36,63 @@ def multiline_input(name: str = 'User'):
     return '\n'.join(lines)
 
 def main(args):
-    device = torch.device(args.device)
-    model_handler = ModelGenerationHandler(args.path, device=device, )
-    model_handler.load_model(compiled=args.compile)
+    api_url = f"http://{args.host}:{args.port}/v1/chat/completions"
+    logger.info(f"Connecting to server at {api_url}")
 
-    dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
-    with open(os.path.join(args.path, 'sysprompt.txt'), 'r', encoding='utf-8') as f: sysprompt = f.read().format(datetime=dt).strip()
+    try:
+        dt = datetime.datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+        with open(args.sysprompt, 'r', encoding='utf-8') as f:
+            sysprompt_text = f.read().format(datetime=dt).strip()
+        logger.info(f"Loaded system prompt from {args.sysprompt}")
+    except FileNotFoundError:
+        logger.warning(f"System prompt file not found at '{args.sysprompt}'. Starting without a system prompt.")
+        sysprompt_text = ""
 
-    prompt = ConversationFormatter(assistant_name=args.botname)
-    prompt.add_msg('system', [TextContent(segments=[TextSegment(text=sysprompt)])])
+    messages: list[InferenceItem] = []
+    if sysprompt_text: messages.append(InferenceItem(role='system', content=[InferenceTextContent(text=sysprompt_text)]))
 
     while True:
-        inp = multiline_input(args.name)
-        if inp == '': break
-        if inp.casefold() == 'reset':
-            prompt.reset()
-            prompt.add_msg('system', [TextContent(segments=[TextSegment(text=sysprompt)])])
+        user_input = multiline_input(args.name)
+        if not user_input: break
+        if user_input.casefold() == 'reset':
+            messages.clear()
+            if sysprompt_text:
+                messages.append(InferenceItem(role='system', content=[InferenceTextContent(text=sysprompt_text)]))
+            print("Chat history has been reset.")
             continue
-        prompt.add_msg(args.name, [TextContent(segments=[TextSegment(text=inp)])])
-        decoded = ""
-        print(f"{args.botname}:", end="", flush=True)
-        for text in model_handler.generate_stream(prompt.get_prompt_for_completion(), skip_special_tokens=False):
-            print(text, end="", flush=True)
-            decoded += text
+        messages.append(InferenceItem(role=args.name, content=[InferenceTextContent(text=user_input)]))
+        request_payload = {"messages": [msg.model_dump() for msg in messages], "assistant_name": args.botname}
+        full_response_text = ""
+        print(f"{args.botname}: ", end="", flush=True)
+        try:
+            with requests.post(api_url, json=request_payload, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:  continue
+                    try:
+                        event = json.loads(line)
+                        event_type = event.get("type")
+                        if event_type == "text_chunk":
+                            text_chunk = event.get("text", "")
+                            print(text_chunk, end="", flush=True)
+                            full_response_text += text_chunk
+                        elif event_type == "finished":
+                            break
+                        elif event_type in ("parsing_error", "error") or event.get("reason") == "error":
+                            error_details = event.get('details', event.get('error', 'Unknown error'))
+                            logger.error(f"\nReceived error from server: {error_details}")
+                            break
+                    except json.JSONDecodeError:
+                        logger.error(f"\nFailed to decode JSON from server response: {line}")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"\nCould not connect to the server at {api_url}. Is it running?")
+            logger.error(f"Details: {e}")
+            messages.pop()
+            continue
+
         print()
-        prompt.add_msg(args.botname, [TextContent(segments=[TextSegment(text=decoded)])])
+        if full_response_text: messages.append(InferenceItem(role=args.botname, content=[InferenceTextContent(text=full_response_text)]))
 
 if __name__ == '__main__':
     main(args=parser.parse_args())
